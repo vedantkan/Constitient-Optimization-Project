@@ -1,0 +1,2242 @@
+---
+title: "Classification"
+author: "Vedant Kansara"
+date: "2022-12-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load Packages
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+library(tidymodels)
+```
+
+
+```{r}
+tidymodels_prefer()
+```
+
+## Read Data
+
+```{r}
+df <- readr::read_csv('fall2022_finalproject.csv', col_names = TRUE)
+```
+
+**Making data frame for derived inputs**
+
+```{r}
+df_derived <- df %>%
+  mutate(x5 = 1 - (x1 + x2 + x3 + x4),
+         w = x2 / (x3 + x4),
+         z = (x1 + x2) / (x4 + x5),
+         t = v1 * v2)
+```
+
+
+**Changing the output response**
+
+```{r}
+df_cat <- df %>%
+  mutate(outcome = ifelse(output < 0.33, "event", "non-event"),
+         outcome = factor(outcome, levels = c("event", "non-event"))) %>%
+  select(-output)
+```
+
+```{r}
+df_derived_cat <- df_derived %>%
+  mutate(outcome = ifelse(output < 0.33, "event", "non-event"),
+         outcome = factor(outcome, levels = c("event", "non-event"))) %>%
+  select(-output)
+```
+
+### Predictive MOdelling
+
+```{r}
+set.seed(7899)
+
+cv_folds_1 <- vfold_cv(df_cat, v = 10, repeats = 5, strata = outcome)
+
+cv_folds_2 <- vfold_cv(df_derived_cat, v = 10, repeats = 5, strata = outcome)
+```
+
+
+```{r}
+my_metrics <- metric_set(accuracy, roc_auc, mn_log_loss)
+```
+
+**Defining linear model engine**
+
+```{r}
+glm_spec <- logistic_reg() %>%
+  set_engine("glm")
+```
+
+
+##### Using Base Features Set
+
+**Model-1 Linear Additive Features**
+
+```{r}
+bp_stan_base <- recipe(outcome ~ ., data = df_cat) %>%
+  step_BoxCox(x2) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors())
+```
+
+```{r}
+glm_mod_1_wflow <- workflow() %>%
+  add_model(glm_spec) %>%
+  add_recipe(bp_stan_base)
+```
+
+```{r}
+glm_mod1 <- glm_mod_1_wflow %>%
+  fit_resamples(cv_folds_1, metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+```{r}
+glm_mod1 %>% collect_metrics()
+```
+
+**Model-2 Interaction of categorical input with all continuous inputs**
+
+```{r}
+bp_int_base <- bp_stan_base %>%
+  step_dummy(m) %>%
+  step_interact( ~ starts_with("x") : starts_with("m")) %>%
+  step_interact( ~ starts_with("v") : starts_with("m"))
+```
+
+```{r}
+glm_mod2_wflow <- workflow() %>%
+  add_model(glm_spec) %>%
+  add_recipe(bp_int_base)
+```
+
+```{r}
+glm_mod2 <- glm_mod2_wflow %>%
+  fit_resamples(cv_folds_1, metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+```{r}
+glm_mod2 %>% collect_metrics()
+```
+
+**Model-3 All pair-wise interaction of the continuous inputs**
+
+```{r}
+bp_pair_base <- recipe(outcome ~ x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5, data = df_cat) %>%
+  step_BoxCox(x2) %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_interact( ~ all_predictors() : all_predictors())
+```
+
+
+```{r}
+glm_mod3_wflow <- workflow() %>%
+  add_model(glm_spec) %>%
+  add_recipe(bp_pair_base)
+```
+
+```{r}
+glm_mod3 <- glm_mod3_wflow %>%
+  fit_resamples(cv_folds_1, metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+```{r}
+glm_mod3 %>% collect_metrics()
+```
+
+
+##### Using Expanded Features Set
+
+**Model-4 Linear Additive Features**
+
+```{r}
+bp_stan_exp <- recipe(outcome ~ x4 + x5 + v1 + v3 + v4 + v5 + w + z + t + m, data = df_derived_cat) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors())
+```
+
+```{r}
+glm_mod4_wflow <- workflow() %>%
+  add_model(glm_spec) %>%
+  add_recipe(bp_stan_exp)
+```
+
+```{r}
+glm_mod4 <- glm_mod4_wflow %>%
+  fit_resamples(cv_folds_2, metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+```{r}
+glm_mod4 %>% collect_metrics()
+```
+
+**Model-5 Interaction of the categorical input with all continuous inputs**
+
+```{r}
+bp_int_exp <- bp_stan_exp %>%
+  step_dummy(m) %>%
+  step_interact( ~ starts_with("x") : starts_with("m")) %>%
+  step_interact( ~ starts_with("v") : starts_with("m")) %>%
+  step_interact( ~ w : starts_with("m")) %>%
+  step_interact( ~ z : starts_with("m")) %>%
+  step_interact( ~ t : starts_with("m"))
+```
+
+```{r}
+glm_mod5_wflow <- workflow() %>%
+  add_model(glm_spec) %>%
+  add_recipe(bp_int_exp)
+```
+
+```{r}
+glm_mod5 <- glm_mod5_wflow %>%
+  fit_resamples(cv_folds_2, metrics = my_metrics, 
+                control = control_resamples(save_pred = TRUE))
+```
+
+```{r}
+glm_mod5 %>% collect_metrics()
+```
+
+**Model-6 Pair-wise interaction between continuous features**
+
+```{r}
+bp_pair_exp <- recipe(outcome ~ x4 + x5 + v1 + v3 + v4 + v5 + w + z + t, data = df_derived_cat) %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_interact( ~ all_predictors() : all_predictors())
+```
+
+```{r}
+glm_mod6_wflow <- workflow() %>%
+  add_model(glm_spec) %>%
+  add_recipe(bp_pair_exp)
+```
+
+```{r}
+glm_mod6 <- glm_mod6_wflow %>%
+  fit_resamples(cv_folds_2, metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+```{r}
+glm_mod6 %>% collect_metrics()
+```
+
+##### Linear basis Function Models
+**Model-7 Additive natural splines with base features**
+
+```{r}
+bp_spline_base <- recipe(outcome ~ ., data = df_cat) %>%
+  step_BoxCox(x2) %>%
+  step_scale(all_numeric_predictors()) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_ns(all_numeric_predictors(), deg_free = 4) %>%
+  step_dummy(m)
+```
+
+```{r}
+glm_mod7_wflow <- workflow() %>%
+  add_model(glm_spec) %>%
+  add_recipe(bp_spline_base)
+```
+
+```{r}
+glm_mod7 <- glm_mod7_wflow %>%
+  fit_resamples(cv_folds_1, metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+```{r}
+glm_mod7 %>% collect_metrics()
+```
+
+**Model-8 Additive natural splines with expanded features**
+
+
+```{r}
+bp_spline_exp <- recipe(outcome ~ x4 + x5 + v1 + v3 + v4 + v5 + w + z + t + m, data = df_derived_cat) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors()) %>%
+  step_ns(all_numeric_predictors(), deg_free = 4) %>%
+  step_dummy(m)
+```
+
+```{r}
+glm_mod8_wflow <- workflow() %>%
+  add_model(glm_spec) %>%
+  add_recipe(bp_spline_exp)
+```
+
+```{r}
+glm_mod8 <- glm_mod8_wflow %>%
+  fit_resamples(cv_folds_2, metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+```{r}
+glm_mod8 %>% collect_metrics()
+```
+**Model-9 Additive polynomials with base features**
+
+```{r}
+bp_poly_base <- recipe(outcome ~ ., data = df_cat) %>%
+  step_BoxCox(x2) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors()) %>%
+  step_poly(all_numeric_predictors(), degree = 3)
+```
+
+```{r}
+glm_mod9_wflow <- workflow() %>%
+  add_model(glm_spec) %>%
+  add_recipe(bp_pair_base)
+```
+
+```{r}
+glm_mod9 <- glm_mod9_wflow %>% 
+  fit_resamples(cv_folds_1, metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+```{r}
+glm_mod9 %>% collect_metrics()
+```
+**Model-10 Additive polynomials with expanded features**
+
+```{r}
+bp_poly_exp <- recipe(outcome ~ x4 + x5 + v1 + v3 + v4 + v5 + w + z + t + m, data = df_derived_cat) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors()) %>%
+  step_poly(all_numeric_predictors(), degree = 3)
+```
+
+```{r}
+glm_mod10_wflow <- workflow() %>%
+  add_model(glm_spec) %>%
+  add_recipe(bp_poly_exp)
+```
+
+```{r}
+glm_mod10 <- glm_mod10_wflow %>%
+  fit_resamples(cv_folds_2, metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+```{r}
+glm_mod10 %>% collect_metrics()
+```
+
+**Model-11 Interaction of categorical feature with natural spline continuous features using base set**
+
+```{r}
+bp_ns_int_base <- recipe(outcome ~ ., data = df_cat) %>%
+  step_BoxCox(x2) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors()) %>%
+  step_ns(all_numeric_predictors(), deg_free = 4) %>%
+  step_dummy(m) %>%
+  step_interact( ~ (contains("ns") : starts_with("m")))
+```
+
+```{r}
+glm_mod11_wflow <- workflow() %>%
+  add_model(glm_spec) %>%
+  add_recipe(bp_ns_int_base)
+```
+
+```{r}
+glm_mod11 <- glm_mod11_wflow %>%
+  fit_resamples(cv_folds_1, metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+```{r}
+glm_mod11 %>% collect_metrics()
+```
+
+**Model-12 Interaction of categorical feature with natural spline continuous features using expanded set**
+
+```{r}
+bp_ns_int_exp <- recipe(outcome ~ x4 + x5 + v1 + v3 + v4 + v5 + w + z + t + m, data = df_derived_cat) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors()) %>%
+  step_ns(all_numeric_predictors(), deg_free = 4) %>%
+  step_dummy(m) %>%
+  step_interact( ~ (contains("ns") : starts_with("m")))
+```
+
+```{r}
+glm_mod12_wflow <- workflow() %>%
+  add_model(glm_spec) %>%
+  add_recipe(bp_ns_int_exp)
+```
+
+```{r}
+glm_mod12 <- glm_mod12_wflow %>%
+  fit_resamples(cv_folds_2, metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+```{r}
+glm_mod12 %>% collect_metrics()
+```
+
+### Generalized linear methods comparison
+
+```{r}
+glm_cv_summary <- glm_mod1 %>% collect_metrics() %>% 
+  mutate(wflow_id = "mod_01") %>%
+  bind_rows(glm_mod2 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_02")) %>%
+  bind_rows(glm_mod3 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_03"))%>%
+  bind_rows(glm_mod4 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_04"))%>%
+  bind_rows(glm_mod5 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_05"))%>%
+  bind_rows(glm_mod6 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_06"))%>%
+  bind_rows(glm_mod7 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_07"))%>%
+  bind_rows(glm_mod8 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_08"))%>%
+  bind_rows(glm_mod9 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_09"))%>%
+  bind_rows(glm_mod10 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_10"))%>%
+  bind_rows(glm_mod11 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_11"))%>%
+  bind_rows(glm_mod12 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_12"))
+```
+
+
+```{r}
+glm_cv_summary %>%
+  ggplot(mapping = aes(x = wflow_id)) +
+  geom_linerange(mapping = aes(ymin = mean - 2*std_err,
+                               ymax = mean + 2*std_err,
+                               group = interaction(.metric, wflow_id)),
+                 color = "grey50", size = 0.75) +
+  geom_linerange(mapping = aes(ymin = mean - 1*std_err,
+                               ymax = mean + 1*std_err,
+                               group = interaction(.metric, wflow_id)),
+                 color = "red", size = 1.45) + 
+  geom_point(mapping = aes(y = mean),
+             color = "red", size = 3.1) +
+  facet_wrap(~.metric, scales = "free_y", nrow = 1) + 
+  labs(x = "", y = "performance metric") + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) 
+```
+
+From the above figure we ca tell that according to all metrics that is **accuracy**, **mn_log_loss**, and **roc_auc** model-8 is the best model.  
+
+
+
+```{r}
+glm_cv_result <- glm_mod1 %>% collect_predictions(summarise = FALSE) %>% 
+  mutate(wflow_id = "mod_01") %>%
+  bind_rows(glm_mod2 %>% collect_predictions(summarise = FALSE) %>%
+              mutate(wflow_id = "mod_02")) %>%
+  bind_rows(glm_mod3 %>% collect_predictions(summarise = FALSE) %>%
+              mutate(wflow_id = "mod_03"))%>%
+  bind_rows(glm_mod4 %>% collect_predictions(summarise = FALSE) %>%
+              mutate(wflow_id = "mod_04"))%>%
+  bind_rows(glm_mod5 %>% collect_predictions(summarise = FALSE) %>%
+              mutate(wflow_id = "mod_05"))%>%
+  bind_rows(glm_mod6 %>% collect_predictions(summarise = FALSE) %>%
+              mutate(wflow_id = "mod_06"))%>%
+  bind_rows(glm_mod7 %>% collect_predictions(summarise = FALSE) %>%
+              mutate(wflow_id = "mod_07"))%>%
+  bind_rows(glm_mod8 %>% collect_predictions(summarise = FALSE) %>%
+              mutate(wflow_id = "mod_08"))%>%
+  bind_rows(glm_mod9 %>% collect_predictions(summarise = FALSE) %>%
+              mutate(wflow_id = "mod_09"))%>%
+  bind_rows(glm_mod10 %>% collect_predictions(summarise = FALSE) %>%
+              mutate(wflow_id = "mod_10"))%>%
+  bind_rows(glm_mod11 %>% collect_predictions(summarise = FALSE) %>%
+              mutate(wflow_id = "mod_11"))%>%
+  bind_rows(glm_mod12 %>% collect_predictions(summarise = FALSE) %>%
+              mutate(wflow_id = "mod_12"))
+```
+
+```{r}
+glm_cv_result %>% 
+  group_by(wflow_id) %>%
+  roc_curve(outcome, .pred_event) %>%
+  autoplot()
+```
+
+##### PLotting the coefficient summary of top-3 models
+
+**First fitting the top-3 models**
+
+```{r}
+final_glm_mod7 <- glm_mod7_wflow %>% 
+  fit(df_cat)
+```
+
+
+```{r}
+final_glm_mod8 <- glm_mod8_wflow %>% 
+  fit(df_derived_cat)
+```
+
+
+```{r}
+final_glm_mod12 <- glm_mod12_wflow %>% 
+  fit(df_derived_cat)
+```
+
+**Plotting the coef-plot for all 3 models**
+
+```{r}
+tidy(final_glm_mod7) %>%
+     ggplot(mapping = aes(x = term)) +
+     geom_hline(yintercept = 0, color = "grey", linetype = "dashed") +
+     geom_point(mapping = aes(y = estimate)) +
+     geom_linerange(mapping = aes(ymin = estimate - 2*std.error,
+                                  ymax = estimate + 2*std.error,
+                                  group = term)) + 
+     labs(x = 'feature', y = 'coefficient value') +
+     coord_flip() +
+     theme_bw()
+```
+
+```{r}
+tidy(final_glm_mod8) %>%
+     ggplot(mapping = aes(x = term)) +
+     geom_hline(yintercept = 0, color = "grey", linetype = "dashed") +
+     geom_point(mapping = aes(y = estimate)) +
+     geom_linerange(mapping = aes(ymin = estimate - 2*std.error,
+                                  ymax = estimate + 2*std.error,
+                                  group = term)) + 
+     labs(x = 'feature', y = 'coefficient value') +
+     coord_flip() +
+     theme_bw()
+```
+
+
+# NOn - Linear Models
+
+##### Elastic Net
+
+**Fitting a Lasso model to get idea about the intervals of the tuning parameter**
+
+```{r}
+lasso_for_fit <- logistic_reg(penalty = 0.1, mixture = 1) %>%
+  set_engine("glmnet",
+             intercept = TRUE, standardize = TRUE)
+```
+
+```{r}
+bp_lasso <- bp_spline_base
+```
+
+
+```{r}
+lasso_fit_wflow <- workflow() %>%
+  add_model(lasso_for_fit) %>%
+  add_recipe(bp_lasso)
+```
+
+```{r}
+lasso_fit <- lasso_fit_wflow %>%
+  fit(df_cat)
+```
+
+```{r}
+lasso_fit %>% extract_fit_parsnip() %>%
+  pluck("fit") %>% 
+  plot(xvar = "lambda")
+```
+
+```{r}
+lasso_fit %>% extract_fit_parsnip() %>%
+  pluck("fit") %>% 
+  broom:::tidy.glmnet() %>% 
+  distinct(lambda) %>% 
+  arrange(lambda) %>% 
+  pull() %>% 
+  log() %>% 
+  summary()
+```
+
+```{r}
+my_lambda <- penalty(range = c(-10, -1), trans = log_trans())
+
+my_alpha <- mixture(range = c(0.1, 1.0))
+
+enet_grid <- grid_regular(my_lambda, my_alpha,
+                          levels = c(penalty = 75, mixture = 5))
+```
+
+
+```{r}
+enet_spec <- logistic_reg(penalty = tune(), mixture = tune()) %>%
+  set_engine("glmnet",
+             intercept = TRUE, standardize = TRUE,
+             path_values = exp(seq(-10, -1, length.out = 75)))
+```
+
+
+```{r}
+bp_enet <- recipe(outcome ~., data = df_cat) %>%
+  step_BoxCox(x2) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors()) %>%
+  step_dummy(m) %>%
+  step_interact( ~ all_numeric_predictors() : all_numeric_predictors()) 
+```
+
+
+```{r}
+enet_wflow <- workflow() %>%
+  add_model(enet_spec) %>%
+  add_recipe(bp_enet)
+```
+
+
+```{r}
+if(parallel::detectCores(logical=FALSE) > 3){
+  library(doParallel)
+  
+  num_cores <- parallel::detectCores(logical=FALSE)
+  cl <- makePSOCKcluster(num_cores - 1)
+  registerDoParallel(cl)
+}
+```
+
+```{r}
+start_enet <- Sys.time()
+
+enet_res <- tune_grid(
+  enet_wflow,
+  resamples = cv_folds_1,
+  grid = enet_grid,
+  metrics = my_metrics
+)
+
+finish_enet <- Sys.time()
+
+finish_enet - start_enet
+```
+
+
+**We will visualize the results**
+
+```{r}
+enet_res %>% collect_metrics() %>%
+  ggplot(mapping = aes(x = log(penalty))) + 
+  geom_ribbon(mapping = aes(ymin = mean - std_err,
+                            ymax = mean + std_err,
+                            group = interaction(mixture, .metric),
+                            fill = as.factor(mixture)),
+              alpha = 0.35) + 
+  geom_line(mapping = aes(y = mean,
+                          group = interaction(mixture, .metric),
+                          color = as.factor(mixture)),
+            size = 1.15) +
+  facet_wrap(~.metric, scales = "free_y", ncol = 1) +
+  scale_fill_viridis_d("mixing fraction") + 
+  scale_color_viridis_d("mixing fraction") +
+  labs(y = "performance metric value") +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+Checking which tuning parameter is the best according to **roc_auc**
+
+```{r}
+enet_res %>% select_best(metric = "roc_auc")
+```
+
+Since the value of mixture is one our model is a Lasso model.  
+
+
+Tunining parameter based on 1-standard error rule.
+
+```{r}
+enet_res %>% 
+  select_by_one_std_err(desc(penalty), desc(mixture), metric = "roc_auc")
+```
+
+```{r}
+enet_res %>% collect_metrics() %>% 
+  filter(.metric %in% c("roc_auc")) %>% 
+  ggplot(mapping = aes(x = log(penalty))) +
+  geom_ribbon(mapping = aes(ymin = mean - std_err,
+                            ymax = mean + std_err,
+                            group = interaction(mixture, .metric),
+                            fill = as.factor(mixture)),
+              alpha = 0.35) +
+  geom_line(mapping = aes(y = mean,
+                          group = interaction(mixture, .metric),
+                          color = as.factor(mixture)),
+            size = 1.15) +
+  geom_vline(data = enet_res %>% select_best("roc_auc"),
+             mapping = aes(xintercept = log(penalty)),
+             color = 'red', linetype = 'dashed', size = 1.2) +
+  geom_vline(data = enet_res %>% 
+               select_by_one_std_err(desc(penalty), desc(mixture), metric = 'roc_auc'),
+             mapping = aes(xintercept = log(penalty)),
+             color = 'orange', linetype = 'dashed', size = 1.2) +
+  facet_wrap(~.metric, scales = "free_y", ncol = 1) +
+  scale_fill_viridis_d("mixing fraction") +
+  scale_color_viridis_d("mixing fraction") +
+  labs(y = 'performance metric value') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+```{r}
+enet_best_roc_auc_params <- enet_res %>% 
+  select_by_one_std_err(desc(penalty), desc(mixture), metric = 'roc_auc') %>% 
+  select(all_of(names(enet_grid)))
+
+final_enet_wflow <- enet_wflow %>% 
+  finalize_workflow(enet_best_roc_auc_params)
+```
+
+
+```{r}
+final_enet_res <- final_enet_wflow %>% 
+  fit_resamples(cv_folds_1,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+```{r}
+final_enet_res %>% collect_metrics()
+```
+```{r}
+final_enet_fit <- final_enet_wflow %>% fit(df_cat)
+```
+
+```{r}
+final_enet_fit %>% 
+  tidy() %>% 
+  filter(!stringr::str_detect(term, "Intercept")) %>% 
+  summarise(num_zero = sum(estimate == 0),
+            fraction_zero = mean(estimate == 0))
+```
+
+**Elastic net using the mode-7**
+
+```{r}
+enet_wflow_glm7 <- workflow() %>%
+  add_model(enet_spec) %>%
+  add_recipe(bp_spline_base)
+```
+
+
+```{r}
+start_enet <- Sys.time()
+
+enet_glm7_res <- tune_grid(
+  enet_wflow_glm7,
+  resamples = cv_folds_1,
+  grid = enet_grid,
+  metrics = my_metrics
+)
+
+finish_enet <- Sys.time()
+
+finish_enet - start_enet
+```
+**We will visualize the results**
+
+```{r}
+enet_glm7_res %>% collect_metrics() %>%
+  ggplot(mapping = aes(x = log(penalty))) + 
+  geom_ribbon(mapping = aes(ymin = mean - std_err,
+                            ymax = mean + std_err,
+                            group = interaction(mixture, .metric),
+                            fill = as.factor(mixture)),
+              alpha = 0.35) + 
+  geom_line(mapping = aes(y = mean,
+                          group = interaction(mixture, .metric),
+                          color = as.factor(mixture)),
+            size = 1.15) +
+  facet_wrap(~.metric, scales = "free_y", ncol = 1) +
+  scale_fill_viridis_d("mixing fraction") + 
+  scale_color_viridis_d("mixing fraction") +
+  labs(y = "performance metric value") +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+Checking which tuning parameter is the best according to **roc_auc**
+
+```{r}
+enet_glm7_res %>% select_best(metric = "roc_auc")
+```
+
+Since the value of mixture is one our model is a Lasso model.  
+
+
+Tuning parameter based on 1-standard error rule.
+
+```{r}
+enet_glm7_res %>% 
+  select_by_one_std_err(desc(penalty), desc(mixture), metric = "roc_auc")
+```
+
+```{r}
+enet_glm7_res %>% collect_metrics() %>% 
+  filter(.metric %in% c("roc_auc")) %>% 
+  ggplot(mapping = aes(x = log(penalty))) +
+  geom_ribbon(mapping = aes(ymin = mean - std_err,
+                            ymax = mean + std_err,
+                            group = interaction(mixture, .metric),
+                            fill = as.factor(mixture)),
+              alpha = 0.35) +
+  geom_line(mapping = aes(y = mean,
+                          group = interaction(mixture, .metric),
+                          color = as.factor(mixture)),
+            size = 1.15) +
+  geom_vline(data = enet_glm7_res %>% select_best("roc_auc"),
+             mapping = aes(xintercept = log(penalty)),
+             color = 'red', linetype = 'dashed', size = 1.2) +
+  geom_vline(data = enet_glm7_res %>% 
+               select_by_one_std_err(desc(penalty), desc(mixture), metric = 'roc_auc'),
+             mapping = aes(xintercept = log(penalty)),
+             color = 'orange', linetype = 'dashed', size = 1.2) +
+  facet_wrap(~.metric, scales = "free_y", ncol = 1) +
+  scale_fill_viridis_d("mixing fraction") +
+  scale_color_viridis_d("mixing fraction") +
+  labs(y = 'performance metric value') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+```{r}
+enet_glm7_best_roc_auc_params <- enet_glm7_res %>%
+  select_by_one_std_err(desc(penalty), desc(mixture), metric = "roc_auc") %>%
+  select(all_of(names(enet_grid)))
+
+final_enet_glm7_wflow <- enet_wflow_glm7 %>%
+  finalize_workflow(enet_glm7_best_roc_auc_params)
+```
+
+```{r}
+final_glm7_enet_res <- final_enet_glm7_wflow %>%
+  fit_resamples(cv_folds_1,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+final_glm7_enet_res %>% collect_metrics()
+```
+
+```{r}
+final_glm7_enet_fit <- final_enet_glm7_wflow %>% fit(df_cat)
+```
+
+```{r}
+final_glm7_enet_fit %>% 
+  tidy() %>% 
+  filter(!stringr::str_detect(term, "Intercept")) %>% 
+  summarise(num_zero = sum(estimate == 0),
+            fraction_zero = mean(estimate == 0))
+```
+
+
+**Elastic net using the mode-8**
+
+```{r}
+enet_wflow_glm8 <- workflow() %>%
+  add_model(enet_spec) %>%
+  add_recipe(bp_spline_exp)
+```
+
+
+```{r}
+start_enet <- Sys.time()
+
+enet_glm8_res <- tune_grid(
+  enet_wflow_glm8,
+  resamples = cv_folds_2,
+  grid = enet_grid,
+  metrics = my_metrics
+)
+
+finish_enet <- Sys.time()
+
+finish_enet - start_enet
+```
+
+**We will visualize the results**
+
+```{r}
+enet_glm8_res %>% collect_metrics() %>%
+  ggplot(mapping = aes(x = log(penalty))) + 
+  geom_ribbon(mapping = aes(ymin = mean - std_err,
+                            ymax = mean + std_err,
+                            group = interaction(mixture, .metric),
+                            fill = as.factor(mixture)),
+              alpha = 0.35) + 
+  geom_line(mapping = aes(y = mean,
+                          group = interaction(mixture, .metric),
+                          color = as.factor(mixture)),
+            size = 1.15) +
+  facet_wrap(~.metric, scales = "free_y", ncol = 1) +
+  scale_fill_viridis_d("mixing fraction") + 
+  scale_color_viridis_d("mixing fraction") +
+  labs(y = "performance metric value") +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+Checking which tuning parameter is the best according to **roc_auc**
+
+```{r}
+enet_glm8_res %>% select_best(metric = "roc_auc")
+```
+
+Since the value of mixture is one our model is a Lasso model.  
+
+
+Tuning parameter based on 1-standard error rule.
+
+```{r}
+enet_glm8_res %>% 
+  select_by_one_std_err(desc(penalty), desc(mixture), metric = "roc_auc")
+```
+
+```{r}
+enet_glm8_res %>% collect_metrics() %>% 
+  filter(.metric %in% c("roc_auc")) %>% 
+  ggplot(mapping = aes(x = log(penalty))) +
+  geom_ribbon(mapping = aes(ymin = mean - std_err,
+                            ymax = mean + std_err,
+                            group = interaction(mixture, .metric),
+                            fill = as.factor(mixture)),
+              alpha = 0.35) +
+  geom_line(mapping = aes(y = mean,
+                          group = interaction(mixture, .metric),
+                          color = as.factor(mixture)),
+            size = 1.15) +
+  geom_vline(data = enet_glm8_res %>% select_best("roc_auc"),
+             mapping = aes(xintercept = log(penalty)),
+             color = 'red', linetype = 'dashed', size = 1.2) +
+  geom_vline(data = enet_glm8_res %>% 
+               select_by_one_std_err(desc(penalty), desc(mixture), metric = 'roc_auc'),
+             mapping = aes(xintercept = log(penalty)),
+             color = 'orange', linetype = 'dashed', size = 1.2) +
+  facet_wrap(~.metric, scales = "free_y", ncol = 1) +
+  scale_fill_viridis_d("mixing fraction") +
+  scale_color_viridis_d("mixing fraction") +
+  labs(y = 'performance metric value') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+```{r}
+enet_glm8_best_roc_auc_params <- enet_glm8_res %>%
+  select_by_one_std_err(desc(penalty), desc(mixture), metric = "roc_auc") %>%
+  select(all_of(names(enet_grid)))
+
+final_enet_glm8_wflow <- enet_wflow_glm8 %>%
+  finalize_workflow(enet_glm8_best_roc_auc_params)
+```
+
+```{r}
+final_glm8_enet_res <- final_enet_glm8_wflow %>%
+  fit_resamples(cv_folds_2,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+final_glm8_enet_res %>% collect_metrics()
+```
+
+```{r}
+final_glm8_enet_fit <- final_enet_glm8_wflow %>% fit(df_derived_cat)
+```
+
+```{r}
+final_glm8_enet_fit %>% 
+  tidy() %>% 
+  filter(!stringr::str_detect(term, "Intercept")) %>% 
+  summarise(num_zero = sum(estimate == 0),
+            fraction_zero = mean(estimate == 0))
+```
+
+
+```{r}
+all_results <- glm_mod1 %>% collect_metrics() %>% 
+  mutate(wflow_id = "mod_01") %>%
+  bind_rows(glm_mod4 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_04")) %>%
+  bind_rows(glm_mod7 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_07")) %>%
+  bind_rows(glm_mod8 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_08")) %>%
+  bind_rows(final_enet_res %>% collect_metrics() %>%
+              mutate(wflow_id = "enet")) %>%
+  bind_rows(final_glm7_enet_res %>% collect_metrics() %>%
+              mutate(wflow_id = "enet_7")) %>%
+  bind_rows(final_glm8_enet_res %>% collect_metrics() %>%
+              mutate(wflow_id = "enet_8"))
+
+```
+
+```{r}
+all_results %>%
+  ggplot(mapping = aes(x = wflow_id)) +
+  geom_linerange(mapping = aes(ymin = mean - 2*std_err,
+                               ymax = mean + 2*std_err,
+                               group = interaction(.metric, wflow_id)),
+                 color = "grey50", size = 0.75) +
+  geom_linerange(mapping = aes(ymin = mean - 1*std_err,
+                               ymax = mean + 1*std_err,
+                               group = interaction(.metric, wflow_id)),
+                 color = "red", size = 1.45) + 
+  geom_point(mapping = aes(y = mean),
+             color = "red", size = 3.1) +
+  facet_wrap(~.metric, scales = "free_y", nrow = 1) + 
+  labs(x = "", y = "performance metric") + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) 
+```
+
+##### Neural Network
+
+**Using Base Features**
+
+```{r}
+nnet_spec <- mlp(hidden_units = tune(), penalty = tune(), epochs = 2000) %>% 
+  set_engine("nnet", MaxNWts = 2000, trace=FALSE) %>% 
+  set_mode("classification")
+```
+
+```{r}
+nnet_grid <- crossing(hidden_units = c(5, 10, 15, 25, 30),
+                      penalty = 10^(seq(-10, 1.75, length.out = 21)))
+```
+
+```{r}
+nnet_base_wflow <- workflow() %>% 
+  add_model(nnet_spec) %>% 
+  add_recipe(bp_stan_base)
+```
+
+```{r, eval=FALSE}
+start_nnet <- Sys.time() 
+
+set.seed(111)
+nnet_base_res <- tune_grid(
+  nnet_base_wflow,
+  resamples = cv_folds_1,
+  grid = nnet_grid,
+  metrics = my_metrics
+)
+
+finish_nnet <- Sys.time()
+
+finish_nnet - start_nnet
+```
+
+
+```{r, eval=FALSE}
+nnet_base_res %>% readr::write_rds("nnet_classi_base_model.rds")
+```
+
+
+```{r}
+nnet_base_res <- readr::read_rds("nnet_classi_base_model.rds")
+```
+
+
+
+
+**Visualizing the result**
+
+```{r}
+nnet_base_res %>% collect_metrics() %>% 
+  ggplot(mapping = aes(x = log10(penalty))) +
+  geom_ribbon(mapping = aes(group = interaction(hidden_units, .metric),
+                            fill = as.factor(hidden_units),
+                            ymin = mean - std_err,
+                            ymax = mean + std_err),
+              alpha = 0.4) +
+  geom_line(mapping = aes(group = interaction(hidden_units, .metric),
+                          color = as.factor(hidden_units),
+                          y = mean),
+            size = 1.2) +
+  facet_wrap(~.metric, scales = "free_y", nrow = 1) +
+  scale_fill_viridis_d("Hidden units") +
+  scale_color_viridis_d("Hidden units") +
+  labs(y = 'performance metric value') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+**Selecting Tuning Parameters that maximize roc_auc**
+
+```{r}
+nnet_base_best_max_acc_params <- nnet_base_res %>% 
+  select_best(metric = 'roc_auc')
+```
+
+```{r}
+final_nnet_base_wflow <- nnet_base_wflow %>% 
+  finalize_workflow(nnet_base_best_max_acc_params)
+```
+
+**Final neural network workflow**
+
+```{r}
+final_nnet_base_res <- final_nnet_base_wflow %>% 
+  fit_resamples(cv_folds_1,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_nnet_base_res %>% collect_metrics() %>%
+              mutate(wflow_id = "nnet_base"))
+```
+
+
+**Using Expanded Features**
+
+```{r}
+nnet_exp_wflow <- workflow() %>% 
+  add_model(nnet_spec) %>% 
+  add_recipe(bp_stan_exp)
+```
+
+
+```{r, eval=FALSE}
+start_nnet <- Sys.time() 
+
+set.seed(111)
+nnet_exp_res <- tune_grid(
+  nnet_base_wflow,
+  resamples = cv_folds_2,
+  grid = nnet_grid,
+  metrics = my_metrics
+)
+
+finish_nnet <- Sys.time()
+
+finish_nnet - start_nnet
+```
+
+
+```{r, eval=FALSE}
+nnet_exp_res %>% readr::write_rds("nnet_classi_exp_model.rds")
+```
+
+
+```{r}
+nnet_exp_res <- readr::read_rds("nnet_classi_exp_model.rds")
+```
+
+
+**Visualizing the result**
+
+```{r}
+nnet_exp_res %>% collect_metrics() %>% 
+  ggplot(mapping = aes(x = log10(penalty))) +
+  geom_ribbon(mapping = aes(group = interaction(hidden_units, .metric),
+                            fill = as.factor(hidden_units),
+                            ymin = mean - std_err,
+                            ymax = mean + std_err),
+              alpha = 0.4) +
+  geom_line(mapping = aes(group = interaction(hidden_units, .metric),
+                          color = as.factor(hidden_units),
+                          y = mean),
+            size = 1.2) +
+  facet_wrap(~.metric, scales = "free_y", nrow = 1) +
+  scale_fill_viridis_d("Hidden units") +
+  scale_color_viridis_d("Hidden units") +
+  labs(y = 'performance metric value') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+**Selecting Tuning Parameters that maximize roc_auc**
+
+```{r}
+nnet_exp_best_max_acc_params <- nnet_exp_res %>% 
+  select_best(metric = 'roc_auc')
+```
+
+```{r}
+final_nnet_exp_wflow <- nnet_exp_wflow %>% 
+  finalize_workflow(nnet_exp_best_max_acc_params)
+```
+
+**Final neural network workflow**
+
+```{r}
+final_nnet_exp_res <- final_nnet_exp_wflow %>% 
+  fit_resamples(cv_folds_2,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_nnet_exp_res %>% collect_metrics() %>%
+              mutate(wflow_id = "nnet_exp"))
+```
+
+
+### Random Forest
+
+**Using Base Features**
+
+```{r}
+rf_spec <- rand_forest(mtry = tune(), min_n = tune(), trees = 500) %>% 
+  set_engine("ranger") %>% 
+  set_mode('classification')
+```
+
+
+```{r}
+rf_base_wflow <- workflow() %>% 
+  add_model(rf_spec) %>% 
+  add_formula(outcome ~ .)
+```
+
+
+```{r}
+rf_param_base <- rf_spec %>% parameters() %>% finalize(df_cat)
+
+rf_grid_base <- grid_regular(rf_param_base, levels = c(mtry = 7, min_n = 15),
+                        filter = min_n < 11)
+
+rf_grid_base %>% glimpse()
+```
+
+
+```{r, eval=FALSE}
+start_rf <- Sys.time() 
+
+set.seed(7899)
+rf_base_res <- tune_grid(
+  rf_base_wflow,
+  resamples = cv_folds_1,
+  grid = rf_grid_base,
+  metrics = my_metrics
+)
+
+finish_rf <- Sys.time()
+
+finish_rf - start_rf
+
+```
+
+
+```{r, eval=FALSE}
+rf_base_res %>% readr::write_rds("rf_classi_base_model.rds")
+```
+
+
+```{r}
+rf_base_res <- readr::read_rds("rf_classi_base_model.rds")
+```
+
+
+```{r}
+rf_base_res %>% autoplot() + theme_bw()
+```
+
+```{r}
+rf_base_best_acc_params <- rf_base_res %>% select_best('accuracy')
+```
+
+
+```{r}
+final_rf_base_spec <- rand_forest(mtry = 9,
+                              min_n = 7,
+                              trees = 500) %>% 
+  set_engine('ranger', importance = 'impurity') %>% 
+  set_mode('classification')
+
+final_rf_wflow_base <- workflow() %>% 
+  add_model(final_rf_base_spec) %>% 
+  add_formula(outcome ~ .)
+```
+
+
+**Training and Accessing final model**
+
+```{r}
+final_rf_base_res <- final_rf_wflow_base %>% 
+  fit_resamples(cv_folds_1,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+set.seed(7899)
+final_rf_base_fit <- final_rf_wflow_base %>% 
+  fit(df_cat)
+```
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_rf_base_res %>% collect_metrics() %>%
+              mutate(wflow_id = "rf_base"))
+```
+
+
+
+**Using Expanded Features**
+
+```{r}
+rf_exp_wflow <- workflow() %>% 
+  add_model(rf_spec) %>% 
+  add_formula(outcome ~ x4 + x5 + v1 + v3 + v4 + v5 + w + z + t + m)
+```
+
+
+```{r}
+rf_param_exp <- rf_spec %>% parameters() %>% finalize(df_derived_cat)
+
+rf_grid_exp <- grid_regular(rf_param_exp, levels = c(mtry = 7, min_n = 15),
+                        filter = min_n < 11)
+
+rf_grid_exp %>% glimpse()
+```
+
+
+```{r, eval=FALSE}
+start_rf <- Sys.time() 
+
+set.seed(7899)
+rf_exp_res <- tune_grid(
+  rf_exp_wflow,
+  resamples = cv_folds_2,
+  grid = rf_grid_exp,
+  metrics = my_metrics
+)
+
+finish_rf <- Sys.time()
+
+finish_rf - start_rf
+```
+
+```{r, eval=FALSE}
+rf_exp_res %>% readr::write_rds("rf_classi_expanded_model.rds")
+```
+
+```{r}
+rf_exp_res <- readr::read_rds("rf_classi_expanded_model.rds")
+```
+
+
+```{r}
+rf_exp_res %>% autoplot() + theme_bw()
+```
+
+
+```{r}
+rf_exp_best_acc_params <- rf_exp_res %>% select_best('accuracy')
+```
+
+
+```{r}
+final_rf_exp_spec <- rand_forest(mtry = 8,
+                              min_n = 10,
+                              trees = 500) %>% 
+  set_engine('ranger', importance = 'impurity') %>% 
+  set_mode('classification')
+
+final_rf_wflow_exp <- workflow() %>% 
+  add_model(final_rf_exp_spec) %>% 
+  add_formula(outcome ~ .)
+```
+
+
+**Training and Accessing final model**
+
+```{r}
+final_rf_exp_res <- final_rf_wflow_exp %>% 
+  fit_resamples(cv_folds_2,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+set.seed(7899)
+final_rf_exp_fit <- final_rf_wflow_exp %>% 
+  fit(df_derived_cat)
+```
+
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_rf_exp_res %>% collect_metrics() %>%
+              mutate(wflow_id = "rf_exp"))
+```
+
+
+### Gradient Boosted Trees
+
+**Using Base Features Set**
+
+```{r}
+xgb_spec <- boost_tree(tree_depth = tune(), learn_rate = tune(), 
+                       trees = tune(), mtry = tune(), sample_size = tune()) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("classification")
+```
+
+
+```{r}
+xgb_grid <- crossing(tree_depth = c(1, 3, 6, 9, 12),
+                     learn_rate = c(0.01, 0.1, 0.3),
+                     trees = c(25, 50, 100, 150, 200, 250, 300),
+                     mtry = c(3, 6, 12, 24),
+                     sample_size = c(0.6, 0.8, 1.0))
+
+xgb_grid %>% glimpse()
+```
+
+
+```{r}
+xgb_wflow_base <- workflow() %>% 
+  add_model(xgb_spec) %>% 
+  add_formula(outcome ~ .)
+
+```
+
+
+```{r, eval=FALSE}
+start_xgb <- Sys.time() 
+
+set.seed(111)
+xgb_res_base <- tune_grid(
+  xgb_wflow_base,
+  resamples = cv_folds_1,
+  grid = xgb_grid,
+  metrics = my_metrics
+)
+
+finish_xgb <- Sys.time()
+
+finish_xgb - start_xgb
+```
+
+```{r, eval=FALSE}
+xgb_res_base %>% readr::write_rds("xgb_classi_base_model.rds")
+```
+
+
+```{r}
+xgb_res_base <- readr::read_rds("xgb_classi_base_model.rds")
+```
+
+**The resampling results  visualized for Accuracy.**
+
+```{r}
+xgb_res_base %>% collect_metrics() %>% 
+  filter(.metric == 'accuracy') %>% 
+  ggplot(mapping = aes(x = trees, y = mean)) +
+  geom_line(mapping = aes(color = as.factor(tree_depth),
+                          group = interaction(mtry, tree_depth,
+                                              learn_rate, sample_size),
+                          linetype = as.factor(sample_size)),
+            size = 1.) +
+  facet_grid(learn_rate ~ mtry, labeller = "label_both") +
+  scale_color_viridis_d("tree depth") +
+  scale_linetype_discrete("sample size") +
+  labs(y = 'Accuracy') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+**The roc_auc resampling results**
+
+```{r}
+xgb_res_base %>% collect_metrics() %>% 
+  filter(.metric == 'roc_auc') %>% 
+  ggplot(mapping = aes(x = trees, y = mean)) +
+  geom_line(mapping = aes(color = as.factor(tree_depth),
+                          group = interaction(mtry, tree_depth,
+                                              learn_rate, sample_size),
+                          linetype = as.factor(sample_size)),
+            size = 1.) +
+  facet_grid(learn_rate ~ mtry, labeller = "label_both") +
+  scale_color_viridis_d("tree depth") +
+  scale_linetype_discrete("sample size") +
+  labs(y = 'ROC AUC') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+**The mean log loss resampling results**
+
+```{r}
+xgb_res_base %>% collect_metrics() %>% 
+  filter(.metric == 'mn_log_loss') %>% 
+  ggplot(mapping = aes(x = trees, y = mean)) +
+  geom_line(mapping = aes(color = as.factor(tree_depth),
+                          group = interaction(mtry, tree_depth,
+                                              learn_rate, sample_size),
+                          linetype = as.factor(sample_size)),
+            size = 1.) +
+  facet_grid(learn_rate ~ mtry, labeller = "label_both") +
+  scale_color_viridis_d("tree depth") +
+  scale_linetype_discrete("sample size") +
+  labs(y = 'MN Log Loss') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+
+```{r}
+xgb_best_roc_params_base <- xgb_res_base %>% select_best('roc_auc')
+
+final_xgb_wflow_base <- xgb_wflow_base %>% 
+  finalize_workflow(xgb_best_roc_params_base)
+```
+
+
+```{r}
+set.seed(7899)
+final_xgb_res_base <- final_xgb_wflow_base %>% 
+  fit_resamples(cv_folds_1,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+```{r}
+set.seed(7899)
+final_xgb_fit_base <- final_xgb_wflow_base %>% fit(df_cat)
+```
+
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_xgb_res_base %>% collect_metrics() %>%
+              mutate(wflow_id = "xgb_base"))
+```
+
+
+**Using Expanded Features set**
+
+```{r}
+xgb_wflow_exp <- workflow() %>% 
+  add_model(xgb_spec) %>% 
+  add_formula(outcome ~ x4 + x5 + v1 + v3 + v4 + v5 + w + z + t + m)
+
+```
+
+
+```{r, eval=FALSE}
+start_xgb <- Sys.time() 
+
+set.seed(7899)
+xgb_res_exp <- tune_grid(
+  xgb_wflow_exp,
+  resamples = cv_folds_2,
+  grid = xgb_grid,
+  metrics = my_metrics
+)
+
+finish_xgb <- Sys.time()
+
+finish_xgb - start_xgb
+```
+
+
+```{r, eval=FALSE}
+xgb_res_exp %>% readr::write_rds("xgb_classi_exp_model.rds")
+```
+
+```{r}
+xgb_res_exp <- readr::read_rds("xgb_classi_exp_model.rds")
+```
+
+**The resampling results  visualized for Accuracy.**
+
+```{r}
+xgb_res_exp %>% collect_metrics() %>% 
+  filter(.metric == 'accuracy') %>% 
+  ggplot(mapping = aes(x = trees, y = mean)) +
+  geom_line(mapping = aes(color = as.factor(tree_depth),
+                          group = interaction(mtry, tree_depth,
+                                              learn_rate, sample_size),
+                          linetype = as.factor(sample_size)),
+            size = 1.) +
+  facet_grid(learn_rate ~ mtry, labeller = "label_both") +
+  scale_color_viridis_d("tree depth") +
+  scale_linetype_discrete("sample size") +
+  labs(y = 'Accuracy') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+**The roc_auc resampling results**
+
+```{r}
+xgb_res_exp %>% collect_metrics() %>% 
+  filter(.metric == 'roc_auc') %>% 
+  ggplot(mapping = aes(x = trees, y = mean)) +
+  geom_line(mapping = aes(color = as.factor(tree_depth),
+                          group = interaction(mtry, tree_depth,
+                                              learn_rate, sample_size),
+                          linetype = as.factor(sample_size)),
+            size = 1.) +
+  facet_grid(learn_rate ~ mtry, labeller = "label_both") +
+  scale_color_viridis_d("tree depth") +
+  scale_linetype_discrete("sample size") +
+  labs(y = 'ROC AUC') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+**The mean log loss resampling results**
+
+```{r}
+xgb_res_exp %>% collect_metrics() %>% 
+  filter(.metric == 'mn_log_loss') %>% 
+  ggplot(mapping = aes(x = trees, y = mean)) +
+  geom_line(mapping = aes(color = as.factor(tree_depth),
+                          group = interaction(mtry, tree_depth,
+                                              learn_rate, sample_size),
+                          linetype = as.factor(sample_size)),
+            size = 1.) +
+  facet_grid(learn_rate ~ mtry, labeller = "label_both") +
+  scale_color_viridis_d("tree depth") +
+  scale_linetype_discrete("sample size") +
+  labs(y = 'MN Log Loss') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+```{r}
+xgb_best_roc_params_exp <- xgb_res_exp %>% select_best('roc_auc')
+
+final_xgb_wflow_exp <- xgb_wflow_exp %>% 
+  finalize_workflow(xgb_best_roc_params_exp)
+```
+
+
+```{r}
+set.seed(7899)
+final_xgb_res_exp <- final_xgb_wflow_exp %>% 
+  fit_resamples(cv_folds_2,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+```{r}
+set.seed(7899)
+final_xgb_fit_exp <- final_xgb_wflow_exp %>% fit(df_derived_cat)
+```
+
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_xgb_res_exp %>% collect_metrics() %>%
+              mutate(wflow_id = "xgb_exp"))
+```
+
+
+
+### Naive Bayes
+
+```{r}
+library(discrim)
+```
+
+
+```{r}
+nb_grid <- crossing(smoothness = c(0.5, 0.75, 1.0, 1.25, 1.5),
+                    Laplace = c(0, 1, 2, 3))
+```
+
+
+```{r}
+nb_spec <- naive_Bayes(smoothness = tune(), Laplace = tune()) %>% 
+  set_engine("klaR") %>% 
+  set_mode("classification")
+```
+
+**Using Base Features Set**
+
+```{r}
+nb_wflow_base <- workflow() %>% 
+  add_model(nb_spec) %>% 
+  add_recipe(bp_stan_base)
+```
+
+
+```{r}
+start_nb <- Sys.time()
+
+nb_res_base <- tune_grid(
+  nb_wflow_base,
+  resamples = cv_folds_1,
+  grid = nb_grid,
+  metrics = my_metrics
+)
+
+finish_nb <- Sys.time()
+
+finish_nb - start_nb
+```
+
+
+```{r}
+nb_res_base %>% collect_metrics() %>% 
+  ggplot(mapping = aes(x = smoothness)) +
+  geom_ribbon(mapping = aes(ymin = mean - 1 * std_err,
+                            ymax = mean + 1 * std_err,
+                            group = interaction(Laplace, .metric),
+                            fill = as.factor(Laplace)),
+              alpha = 0.33) +
+  geom_line(mapping = aes(y = mean,
+                          color = as.factor(Laplace),
+                          group = interaction(Laplace, .metric)),
+            size = 1.) +
+  geom_point(mapping = aes(y = mean,
+                           color = as.factor(Laplace)),
+             size = 4) +
+  facet_wrap( ~ .metric, scales = "free_y", ncol = 1) +
+  scale_fill_viridis_d("Laplace") +
+  scale_color_viridis_d("Laplace") +
+  labs(y = 'performance metric') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+
+```{r}
+nb_best_roc_auc_params_base <- nb_res_base %>% 
+  select_best("roc_auc")
+
+final_nb_wflow_base <- nb_wflow_base %>% 
+  finalize_workflow(nb_best_roc_auc_params_base)
+```
+
+
+```{r}
+final_nb_res_base <- final_nb_wflow_base %>% 
+  fit_resamples(cv_folds_1,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_nb_res_base %>% collect_metrics() %>%
+              mutate(wflow_id = "nb_base"))
+```
+
+
+**Using Expanded Features Set**
+
+```{r}
+nb_wflow_exp <- workflow() %>% 
+  add_model(nb_spec) %>% 
+  add_recipe(bp_stan_exp)
+```
+
+
+```{r}
+start_nb <- Sys.time()
+
+nb_res_exp <- tune_grid(
+  nb_wflow_exp,
+  resamples = cv_folds_2,
+  grid = nb_grid,
+  metrics = my_metrics
+)
+
+finish_nb <- Sys.time()
+
+finish_nb - start_nb
+```
+
+
+```{r}
+nb_res_exp %>% collect_metrics() %>% 
+  ggplot(mapping = aes(x = smoothness)) +
+  geom_ribbon(mapping = aes(ymin = mean - 1 * std_err,
+                            ymax = mean + 1 * std_err,
+                            group = interaction(Laplace, .metric),
+                            fill = as.factor(Laplace)),
+              alpha = 0.33) +
+  geom_line(mapping = aes(y = mean,
+                          color = as.factor(Laplace),
+                          group = interaction(Laplace, .metric)),
+            size = 1.) +
+  geom_point(mapping = aes(y = mean,
+                           color = as.factor(Laplace)),
+             size = 4) +
+  facet_wrap( ~ .metric, scales = "free_y", ncol = 1) +
+  scale_fill_viridis_d("Laplace") +
+  scale_color_viridis_d("Laplace") +
+  labs(y = 'performance metric') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+
+```{r}
+nb_best_roc_auc_params_exp <- nb_res_exp %>% 
+  select_best("roc_auc")
+
+final_nb_wflow_exp <- nb_wflow_exp %>% 
+  finalize_workflow(nb_best_roc_auc_params_exp)
+```
+
+
+```{r}
+final_nb_res_exp <- final_nb_wflow_exp %>% 
+  fit_resamples(cv_folds_2,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_nb_res_exp %>% collect_metrics() %>%
+              mutate(wflow_id = "nb_exp"))
+```
+
+
+### Support Vector Machine (SVM)
+
+
+
+```{r}
+rbf_default <- svm_rbf(cost = 1) %>% 
+  set_engine('kernlab') %>% 
+  set_mode('classification')
+
+rbf_default_wflow <- workflow() %>% 
+  add_model(rbf_default) %>% 
+  add_recipe(bp_stan_exp)
+
+rbf_default_fit <- rbf_default_wflow %>% fit(df_derived_cat)
+
+rbf_default_fit
+```
+
+
+
+```{r}
+rbf_grid <- crossing(rbf_sigma = c(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5),
+                     cost = c(0.01, 0.1, 1, 10, 100, 1000))
+```
+
+
+```{r}
+svm_rbf_spec <- svm_rbf(cost = tune(), rbf_sigma = tune()) %>% 
+  set_engine('kernlab') %>% 
+  set_mode('classification')
+```
+
+
+```{r}
+svm_rbf_wflow_base <- workflow() %>% 
+  add_model(svm_rbf_spec) %>% 
+  add_recipe(bp_stan_base)
+```
+
+
+```{r, eval=FALSE}
+start_rbf <- Sys.time() 
+
+set.seed(7899)
+svm_rbf_res_base <- tune_grid(
+  svm_rbf_wflow_base,
+  resamples = cv_folds_1,
+  grid = rbf_grid,
+  metrics = my_metrics
+)
+
+finish_rbf <- Sys.time()
+
+finish_rbf - start_rbf
+```
+
+```{r, eval=FALSE}
+svm_rbf_res_base %>% readr::write_rds("svm_classi_base.rds")
+```
+
+```{r}
+svm_rbf_res_base <- readr::read_rds("svm_classi_base.rds")
+```
+
+
+```{r}
+svm_rbf_res_base %>% autoplot() + theme_bw()
+```
+
+
+```{r}
+rbf_best_max_acc_params_base <- svm_rbf_res_base %>% 
+  select_best(metric = 'accuracy')
+
+final_svm_rbf_wflow_base <- svm_rbf_wflow_base %>% 
+  finalize_workflow(rbf_best_max_acc_params_base)
+```
+
+
+```{r}
+final_svm_rbf_res_base <- final_svm_rbf_wflow_base %>% 
+  fit_resamples(cv_folds_1,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_svm_rbf_res_base %>% collect_metrics() %>%
+              mutate(wflow_id = "svm_base"))
+```
+
+
+**Using Expanded Features Set**
+
+```{r}
+svm_rbf_wflow_exp <- workflow() %>% 
+  add_model(svm_rbf_spec) %>% 
+  add_recipe(bp_stan_exp)
+```
+
+
+```{r, eval=FALSE}
+start_rbf <- Sys.time() 
+
+set.seed(7899)
+svm_rbf_res_exp <- tune_grid(
+  svm_rbf_wflow_exp,
+  resamples = cv_folds_2,
+  grid = rbf_grid,
+  metrics = my_metrics
+)
+
+finish_rbf <- Sys.time()
+
+finish_rbf - start_rbf
+```
+
+```{r, eval=FALSE}
+svm_rbf_res_exp %>% readr::write_rds("svm_classi_exp.rds")
+```
+
+
+```{r}
+svm_rbf_res_exp <- readr::read_rds("svm_classi_exp.rds")
+```
+
+```{r}
+svm_rbf_res_exp %>% autoplot() + theme_bw()
+```
+
+
+```{r}
+rbf_best_max_acc_params_exp <- svm_rbf_res_exp %>% 
+  select_best(metric = 'accuracy')
+
+final_svm_rbf_wflow_exp <- svm_rbf_wflow_exp %>% 
+  finalize_workflow(rbf_best_max_acc_params_exp)
+```
+
+
+```{r}
+final_svm_rbf_res_exp <- final_svm_rbf_wflow_exp %>% 
+  fit_resamples(cv_folds_2,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_svm_rbf_res_exp %>% collect_metrics() %>%
+              mutate(wflow_id = "svm_exp"))
+```
+
+### Model Comparision
+
+```{r}
+all_results %>% 
+  mutate(wflow_id = forcats::fct_reorder(wflow_id, mean, min)) %>% 
+  ggplot(mapping = aes(x = wflow_id)) +
+  geom_linerange(mapping = aes(ymin = mean - 2*std_err,
+                               ymax = mean + 2*std_err,
+                               group = interaction(.metric, wflow_id)),
+                 color = 'grey', size = 1.) +
+  geom_linerange(mapping = aes(ymin = mean - 1*std_err,
+                               ymax = mean + 1*std_err,
+                               group = interaction(.metric, wflow_id)),
+                 color = 'red', size = 1.2) +
+  geom_point(mapping = aes(y = mean),
+             color = 'red', size = 2.5) +
+  coord_flip() +
+  facet_wrap(~.metric, scales = "free_x") +
+  labs(y = "performance metric value", x ="") +
+  theme_bw() 
+  
+```
+
+**Our best model is RF model with expanded features when we are maximizing both Accuracy and ROC_AUC**
+
+**Plotting the ROC_AUC curve**
+
+```{r}
+map2_dfr(list(glm_mod7, glm_mod8,
+              final_enet_res, final_glm7_enet_res, final_glm8_enet_res,
+              final_nnet_base_res, final_nnet_exp_res,
+              final_rf_base_res, final_rf_exp_res,
+              final_xgb_res_base, final_xgb_res_exp,
+              final_nb_res_base, final_nb_res_exp,
+              final_svm_rbf_res_base, final_svm_rbf_res_exp),
+         c("Mod-7", "Mod-8",
+           "ENET", "ENET-7", "ENET-8",
+           "NNET BASE", "NNET EXP",
+           "RF BASE", "RF EXP",
+           "XGB BASE", "XGB EXP",
+           "NB BASE", "NB EXP",
+           "SVM BASE", "SVM EXP"),
+         function(ll, ln){
+           ll %>% collect_predictions() %>% mutate(wflow_id = ln)
+         }) %>%
+  group_by(wflow_id) %>%
+  roc_curve(outcome, .pred_event) %>%
+  autoplot()
+```
+
+```{r}
+all_resample_results <- glm_mod7 %>% collect_metrics(summarize = FALSE) %>%
+  mutate(wflow_id = "Mod-7" ) %>%
+  bind_rows(glm_mod8 %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "Mod-8")) %>%
+  bind_rows(final_enet_res %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "ENET")) %>%
+  bind_rows(final_glm7_enet_res %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "ENET-7")) %>%
+  bind_rows(final_glm8_enet_res %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "ENET-8")) %>%
+  bind_rows(final_nnet_base_res %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "NNET BASE")) %>%
+  bind_rows(final_nnet_exp_res %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "NNET EXP")) %>%
+  bind_rows(final_rf_base_res %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "RF BASE")) %>%
+  bind_rows(final_rf_exp_res %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "RF EXP")) %>%
+  bind_rows(final_xgb_res_base %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "XGB BASE")) %>%
+  bind_rows(final_xgb_res_exp %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "XGB EXP")) %>%
+  bind_rows(final_nb_res_base %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "NB BASE")) %>%
+  bind_rows(final_nb_res_exp %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "NB EXP")) %>%
+  bind_rows(final_svm_rbf_res_base %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "SVM BASE")) %>%
+  bind_rows(final_svm_rbf_res_exp %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "SVM EXP")) %>%
+  mutate(wflow_id = factor(wflow_id,
+                           levels = c("Mod-7", "Mod-8",
+           "ENET", "ENET-7", "ENET-8",
+           "NNET BASE", "NNET EXP",
+           "RF BASE", "RF EXP",
+           "XGB BASE", "XGB EXP",
+           "NB BASE", "NB EXP",
+           "SVM BASE", "SVM EXP")))
+```
+
+
+```{r}
+all_resample_results %>% 
+  mutate(wflow_id = stringr::str_replace(wflow_id, " ", "\n")) %>% 
+  filter(.metric == 'accuracy') %>% 
+  select(wflow_id, .estimate, id, id2) %>% 
+  pivot_wider(id_cols = c("id", "id2"), 
+              names_from = 'wflow_id', values_from = '.estimate') %>% 
+  select(-id, -id2) %>% 
+  corrr::correlate(quiet = TRUE, diagonal = 1) %>% 
+  corrr::stretch() %>% 
+  ggplot(mapping = aes(x = x, y = y)) +
+  geom_tile(mapping = aes(fill = r),
+            color = 'white') +
+  geom_text(mapping = aes(label = signif(r, 3),
+                          color = abs(r) > 0.75),
+            size = 3.5) +
+  scale_fill_gradient2('corr',
+                       low = 'red', mid = 'white', high = 'blue',
+                       midpoint = 0,
+                       limits = c(-1, 1)) +
+  scale_color_manual(guide = 'none',
+                     values = c("TRUE" = 'white',
+                                "FALSE" = 'black')) +
+  labs(x='', y='') +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) 
+```
+
+From the above plot we can see that the results of XGB BASE model and RF BASE model are highly correlated.  
+
+
+# Variable Importance
+
+```{r}
+library(vip)
+```
+
+```{r}
+final_rf_exp_fit %>%
+  extract_fit_parsnip() %>%
+  pluck("fit") %>%
+  vip(num_features = 20) +
+  theme_bw()
+```
+
+```{r}
+final_xgb_fit_base %>%
+  extract_fit_parsnip() %>%
+  pluck("fit") %>%
+  vip(num_features = 20) +
+  theme_bw()
+```
+
+```{r}
+final_rf_base_fit %>%
+  extract_fit_parsnip() %>%
+  pluck("fit") %>%
+  vip(num_features = 20) +
+  theme_bw()
+```
+
+Both the random forest and gradient boosted trees are giving **x1, x2, x3** as most imporatnt features.  
+But when we are using the expanded features set we get **x1** as the most important feature but we get **z** and **w** as the second and the third most important features.  
+
+So we will create visualizing grid based on x1, x2, and z and w.  
+For rest of features use their median values based on the training set.  
+
+
+```{r}
+viz_grid <- expand.grid(x1 = seq(min(df_derived_cat$x1), max(df_derived_cat$x1), length.out = 51),
+                        x2 = seq(min(df_derived_cat$x2), max(df_derived_cat$x2), length.out = 5),
+                        x3 = median(df_derived_cat$x3),
+                        x4 = median(df_derived_cat$x4),
+                        x5 = median(df_derived_cat$x5),
+                        v1 = median(df_derived_cat$v1),
+                        v2 = median(df_derived_cat$v2),
+                        v3 = median(df_derived_cat$v3),
+                        v4 = median(df_derived_cat$v4),
+                        v5 = median(df_derived_cat$v5),
+                        w = seq(min(df_derived_cat$w), max(df_derived_cat$w), length.out = 5),
+                        z = seq(min(df_derived_cat$z), max(df_derived_cat$z), length.out = 51),
+                        t = median(df_derived_cat$t),
+                        m = c("A", "B"),
+                        KEEP.OUT.ATTRS = FALSE,
+                        stringsAsFactors = FALSE) %>% 
+  as.data.frame() %>% tibble::as_tibble()
+
+viz_grid %>% glimpse()
+```
+
+```{r}
+viz_grid %>% purrr::map_dbl(n_distinct)
+```
+
+```{r}
+predict(final_rf_base_fit, new_data = viz_grid) %>% 
+  glimpse()
+```
+
+```{r}
+viz_grid %>% 
+  bind_cols(predict(final_rf_base_fit, new_data = viz_grid)) %>% 
+  ggplot(mapping = aes(x = x1, y = z)) +
+  geom_raster(mapping = aes(fill = .pred_class)) +
+  facet_grid(x2 ~ w, labeller = "label_both") +
+  ggthemes::scale_fill_colorblind() +
+  theme_bw()
+```
+The random forest base model is classifying non-event for almost all values of x2 > 0.3.  
+
+
+```{r}
+predict(final_rf_base_fit, new_data = viz_grid, type = 'prob') %>% 
+  glimpse()
+```
+```{r}
+viz_grid %>% 
+  bind_cols(predict(final_rf_base_fit, new_data = viz_grid, type='prob')) %>% 
+  ggplot(mapping = aes(x = x1, y = z)) +
+  geom_raster(mapping = aes(fill = .pred_event)) +
+  facet_grid(x2 ~ w, labeller = "label_both") +
+  scale_fill_gradient2(low = 'red', mid = 'white', high = 'blue',
+                       midpoint = 0.5,
+                       limits = c(0, 1)) +
+  theme_bw()
+```
+
+The bottom 2 rows have probabilities predictions less than 0.5.  
+
+**Looking at the predictions with random forest model using expanded features set.**
+
+```{r}
+viz_grid %>% 
+  bind_cols(predict(final_rf_exp_fit, new_data = viz_grid)) %>% 
+  ggplot(mapping = aes(x = x1, y = z)) +
+  geom_raster(mapping = aes(fill = .pred_class)) +
+  facet_grid(x2 ~ w, labeller = "label_both") +
+  ggthemes::scale_fill_colorblind() +
+  theme_bw()
+```
+
+```{r}
+viz_grid %>% 
+  bind_cols(predict(final_rf_exp_fit, new_data = viz_grid, type='prob')) %>% 
+  ggplot(mapping = aes(x = x1, y = z)) +
+  geom_raster(mapping = aes(fill = .pred_event)) +
+  facet_grid(x2 ~ w, labeller = "label_both") +
+  scale_fill_gradient2(low = 'red', mid = 'white', high = 'blue',
+                       midpoint = 0.5,
+                       limits = c(0, 1)) +
+  theme_bw()
+```
+
+
+
+```{r}
+if(parallel::detectCores(logical=FALSE) > 3){
+  stopCluster(cl)
+}
+```
+
+
+

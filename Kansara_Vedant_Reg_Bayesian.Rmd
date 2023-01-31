@@ -1,0 +1,595 @@
+---
+title: "Regression with Bayesian Approach"
+author: "Vedant Kansara"
+date: "2022-12-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load Packages
+
+```{r}
+library(tidyverse)
+```
+
+## Read Data
+
+```{r}
+df <- readr::read_csv('fall2022_finalproject.csv', col_names = TRUE)
+```
+
+**Making data frame for derived inputs**
+
+```{r}
+df_derived <- df %>%
+  mutate(x5 = 1 - (x1 + x2 + x3 + x4),
+         w = x2 / (x3 + x4),
+         z = (x1 + x2) / (x4 + x5),
+         t = v1 * v2)
+```
+
+
+
+**Transforming the variables based on EDA**
+
+```{r}
+lambda_x2 <- forecast::BoxCox.lambda(df$x2, lower = -5, upper = 5)
+```
+
+```{r}
+df_t <- df %>%
+  mutate(x2 = forecast::BoxCox(x2, lambda = lambda_x2))
+```
+
+
+**Changing the output response**
+
+```{r}
+df_t <- df_t %>%
+  mutate(y = boot::logit(output)) %>%
+  select(-output)
+```
+
+```{r}
+df_derived <- df_derived %>%
+  mutate(y = boot::logit(output)) %>%
+  select(-output)
+```
+
+**Scaling the variables**
+
+```{r}
+df_scaled <- df_t %>%
+  select(-m) %>%
+  scale(center = TRUE, scale = TRUE) %>%
+  as.data.frame() %>%
+  mutate(m = df$m)
+```
+
+
+```{r}
+df_derived_scaled <- df_derived %>%
+  select(-m) %>%
+  scale(center = TRUE, scale = TRUE) %>%
+  as.data.frame() %>%
+  mutate(m = df$m)
+```
+
+
+**Making the Design Matrix for mod-8 and mod-12**
+
+We are choosing model-8 because it is the best model among all lm models and we are choosing model-12 because it is similar to model-8 but a more complex version of it.
+
+```{r}
+Xmod8 <- model.matrix(y ~ splines::ns(x4, df = 4) +
+                        splines::ns(x5, df = 4) + 
+                        splines::ns(v1, df = 4) + 
+                        splines::ns(v3, df = 4) + 
+                        splines::ns(v4, df = 4) + 
+                        splines::ns(v5, df = 4) + 
+                        splines::ns(w, df = 4) + 
+                        splines::ns(z, df = 4) + 
+                        splines::ns(t, df = 4) +
+                        m, data = df_derived_scaled)
+```
+
+```{r}
+Xmod12 <- model.matrix(y ~ (splines::ns(x4, df = 4) +
+                        splines::ns(x5, df = 4) + 
+                        splines::ns(v1, df = 4) + 
+                        splines::ns(v3, df = 4) + 
+                        splines::ns(v4, df = 4) + 
+                        splines::ns(v5, df = 4) + 
+                        splines::ns(w, df = 4) + 
+                        splines::ns(z, df = 4) + 
+                        splines::ns(t, df = 4)) *
+                        m, data = df_derived_scaled)
+```
+
+**Creating the information list**
+
+```{r}
+info_mod8 <- list(
+  yobs = df_derived_scaled$y,
+  design_matrix = Xmod8,
+  mu_beta = 0,
+  tau_beta = 1,
+  sigma_rate = 1
+)
+```
+
+```{r}
+info_mod8_weak <- list(
+  yobs = df_derived_scaled$y,
+  design_matrix = Xmod8,
+  mu_beta = 0,
+  tau_beta = 25,
+  sigma_rate = 1
+)
+```
+
+
+```{r}
+info_mod12 <- list(
+  yobs = df_derived_scaled$y,
+  design_matrix = Xmod12,
+  mu_beta = 0,
+  tau_beta = 1,
+  sigma_rate = 1
+)
+```
+
+```{r}
+info_mod12_weak <- list(
+  yobs = df_derived_scaled$y,
+  design_matrix = Xmod12,
+  mu_beta = 0,
+  tau_beta = 25,
+  sigma_rate = 1
+)
+```
+
+
+**Defining Log-posterior Function**
+
+```{r}
+lm_logpost <- function(unknowns, my_info)
+{
+  # specify the number of unknown beta parameters
+  length_beta <- ncol(my_info$design_matrix)
+  
+  # extract the beta parameters from the `unknowns` vector
+  beta_v <- unknowns[1:length_beta]
+  
+  # extract the unbounded noise parameter, varphi
+  lik_varphi <- unknowns[length_beta + 1]
+  
+  # back-transform from varphi to sigma
+  lik_sigma <- exp(lik_varphi)
+  
+  # extract design matrix
+  X <- my_info$design_matrix
+  
+  # calculate the linear predictor
+  mu <- as.vector( X %*% as.matrix(beta_v) )
+  
+  # evaluate the log-likelihood
+  log_lik <- sum(dnorm(x = my_info$yobs,
+                       mean = mu,
+                       sd = lik_sigma,
+                       log = TRUE))
+  
+  # evaluate the log-prior
+  log_prior_beta <- sum(dnorm(x = beta_v,
+                              mean = my_info$mu_beta,
+                              sd = my_info$tau_beta,
+                              log = TRUE))
+  
+  log_prior_sigma <- dexp(x = lik_sigma,
+                          rate = my_info$sigma_rate,
+                          log = TRUE)
+  
+  # add the mean trend prior and noise prior together
+  log_prior <- log_prior_beta + log_prior_sigma
+  
+  # account for the transformation
+  log_derive_adjust <- lik_varphi
+  
+  # sum together
+  log_lik + log_prior + log_derive_adjust
+}
+```
+
+
+**Defining Laplace Function**
+
+```{r}
+my_laplace <- function(start_guess, logpost_func, ...)
+{
+  # code adapted from the `LearnBayes`` function `laplace()`
+  fit <- optim(start_guess,
+               logpost_func,
+               gr = NULL,
+               ...,
+               method = "BFGS",
+               hessian = TRUE,
+               control = list(fnscale = -1, maxit = 1001))
+  
+  mode <- fit$par
+  post_var_matrix <- -solve(fit$hessian)
+  p <- length(mode)
+  int <- p/2 * log(2 * pi) + 0.5 * log(det(post_var_matrix)) + logpost_func(mode, ...)
+  # package all of the results into a list
+  list(mode = mode,
+       var_matrix = post_var_matrix,
+       log_evidence = int,
+       converge = ifelse(fit$convergence == 0,
+                         "YES", 
+                         "NO"),
+       iter_counts = as.numeric(fit$counts[1]))
+}
+```
+
+
+
+**Executing Laplace on all four models**
+
+```{r}
+laplace_8_weak <- my_laplace(rep(0, ncol(Xmod8)+1), lm_logpost, info_mod8_weak)
+
+laplace_8_weak$converge
+```
+
+
+```{r}
+laplace_8 <- my_laplace(rep(0, ncol(Xmod8)+1), lm_logpost, info_mod8)
+
+laplace_8$converge
+```
+
+```{r}
+laplace_12_weak <- my_laplace(rep(0, ncol(Xmod12)+1), lm_logpost, info_mod12_weak)
+
+laplace_12_weak$converge
+```
+
+```{r}
+laplace_12 <- my_laplace(rep(0, ncol(Xmod12)+1), lm_logpost, info_mod12)
+
+laplace_12$converge
+```
+
+**Checking which model is best using Evidence based approach**
+
+```{r}
+exp(laplace_8_weak$log_evidence - laplace_12_weak$log_evidence)
+```
+
+```{r}
+exp(laplace_8$log_evidence - laplace_12$log_evidence)
+```
+
+For both weak and strong prior cases model-8 is better than model-12.  
+
+
+**Posterior uncertainty on the noise**
+
+```{r}
+laplace_8$mode[ncol(Xmod8)+1]
+```
+
+
+```{r}
+sqrt(diag(laplace_8$var_matrix))[ncol(Xmod8)+1]
+```
+
+
+```{r}
+laplace_8$mode[ncol(Xmod8)+1] - 2*sqrt(diag(laplace_8$var_matrix))[ncol(Xmod8)+1]
+
+laplace_8$mode[ncol(Xmod8)+1] + 2*sqrt(diag(laplace_8$var_matrix))[ncol(Xmod8)+1]
+```
+
+
+**Function to create coef-plots**
+
+```{r}
+viz_post_coefs <- function(post_means, post_sds, xnames)
+{
+  tibble::tibble(
+    mu = post_means,
+    sd = post_sds,
+    x = xnames
+  ) %>% 
+    mutate(x = factor(x, levels = xnames)) %>% 
+    ggplot(mapping = aes(x = x)) +
+    geom_hline(yintercept = 0, color = 'grey', linetype = 'dashed') +
+    geom_point(mapping = aes(y = mu)) +
+    geom_linerange(mapping = aes(ymin = mu - 2 * sd,
+                                 ymax = mu + 2 * sd,
+                                 group = x)) +
+    labs(x = 'feature', y = 'coefficient value') +
+    coord_flip() +
+    theme_bw()
+}
+```
+
+
+**Creating coef-plots**
+
+```{r}
+viz_post_coefs(laplace_8$mode[1:ncol(Xmod8)],
+               sqrt(diag(laplace_8$var_matrix)[1:ncol(Xmod8)]),
+               colnames(Xmod8))
+```
+
+For model-8 **z** and **x5** looks most significant.  
+
+```{r}
+viz_post_coefs(laplace_12$mode[1:ncol(Xmod12)],
+               sqrt(diag(laplace_12$var_matrix)[1:ncol(Xmod12)]),
+               colnames(Xmod12))
+```
+
+For model-12 too **z** and **x5** are most significant features.  
+
+```{r}
+viz_grid <- expand.grid(x1 = median(df_derived_scaled$x1),
+                        x2 = median(df_derived_scaled$x2),
+                        x3 = median(df_derived_scaled$x3),
+                        x4 = median(df_derived_scaled$x4),
+                        x5 = seq(min(df_derived_scaled$x5), max(df_derived_scaled$x5), length.out = 5),
+                        v1 = median(df_derived_scaled$v1),
+                        v2 = median(df_derived_scaled$v2),
+                        v3 = median(df_derived_scaled$v3),
+                        v4 = median(df_derived_scaled$v4),
+                        v5 = median(df_derived_scaled$v5),
+                        w = seq(min(df_derived_scaled$w), max(df_derived_scaled$w), length.out = 5),
+                        z = seq(min(df_derived_scaled$z), max(df_derived_scaled$z), length.out = 101),
+                        t = median(df_derived_scaled$t),
+                        m = unique(df_derived_scaled$m),
+                        KEEP.OUT.ATTRS = FALSE,
+                        stringsAsFactors = FALSE) %>% 
+  as.data.frame() %>% tibble::as_tibble()
+
+viz_grid %>% glimpse()
+```
+
+```{r}
+generate_lm_post_samples <- function(mvn_result, length_beta, num_samples)
+{
+  MASS::mvrnorm(n = num_samples,
+                mu = mvn_result$mode,
+                Sigma = mvn_result$var_matrix) %>% 
+    as.data.frame() %>% tibble::as_tibble() %>% 
+    purrr::set_names(c(sprintf("beta_%02d", 0:(length_beta-1)), "varphi")) %>% 
+    mutate(sigma = exp(varphi))
+}
+```
+
+
+```{r}
+post_lm_pred_samples <- function(Xnew, Bmat, sigma_vector)
+{
+  # number of new prediction locations
+  M <- nrow(Xnew)
+  # number of posterior samples
+  S <- nrow(Bmat)
+  
+  # matrix of linear predictors
+  Umat <- Xnew %*% t(Bmat)
+  
+  # assmeble matrix of sigma samples, set the number of rows
+  Rmat <- matrix(rep(sigma_vector, M), M, byrow = TRUE)
+  
+  # generate standard normal and assemble into matrix
+  # set the number of rows
+  Zmat <- matrix(rnorm(M*S), M, byrow = TRUE)
+  
+  # calculate the random observation predictions
+  Ymat <- Umat + Rmat * Zmat
+  
+  # package together
+  list(Umat = Umat, Ymat = Ymat)
+}
+```
+
+
+
+```{r}
+make_post_lm_pred <- function(Xnew, post)
+{
+  Bmat <- post %>% select(starts_with("beta_")) %>% as.matrix()
+  
+  sigma_vector <- post %>% pull(sigma)
+  
+  post_lm_pred_samples(Xnew, Bmat, sigma_vector)
+}
+```
+
+
+```{r}
+summarize_lm_pred_from_laplace <- function(mvn_result, Xtest, num_samples)
+{
+  # generate posterior samples of the beta parameters
+  post <- generate_lm_post_samples(mvn_result, ncol(Xtest), num_samples)
+  
+  # make posterior predictions on the test set
+  pred_test <- make_post_lm_pred(Xtest, post)
+  
+  # calculate summary statistics on the predicted mean and response
+  # summarize over the posterior samples
+  
+  # posterior mean, should you summarize along rows (rowMeans) or 
+  # summarize down columns (colMeans) ???
+  mu_avg <- rowMeans(pred_test$Umat)
+  y_avg <- rowMeans(pred_test$Ymat)
+  
+  # posterior quantiles for the middle 95% uncertainty intervals
+  mu_lwr <- apply(pred_test$Umat, 1, stats::quantile, probs = 0.025)
+  mu_upr <- apply(pred_test$Umat, 1, stats::quantile, probs = 0.975)
+  y_lwr <- apply(pred_test$Ymat, 1, stats::quantile, probs = 0.025)
+  y_upr <- apply(pred_test$Ymat, 1, stats::quantile, probs = 0.975)
+  
+  # book keeping
+  tibble::tibble(
+    mu_avg = mu_avg,
+    mu_lwr = mu_lwr,
+    mu_upr = mu_upr,
+    y_avg = y_avg,
+    y_lwr = y_lwr,
+    y_upr = y_upr
+  ) %>% 
+    tibble::rowid_to_column("pred_id")
+}
+```
+
+
+**Function to create spline knots**
+
+```{r}
+make_splines_training_knots <- function(J, train_data, xname)
+{
+  x <- train_data %>% select(all_of(xname)) %>% pull()
+  
+  train_basis <- splines::ns(x, df = J)
+  
+  as.vector(attributes(train_basis)$knots)
+}
+```
+
+**Function to create boundary knots**
+
+```{r}
+make_splines_boundary_knots <- function(J, train_data, xname)
+{
+  x <- train_data %>% select(all_of(xname)) %>% pull()
+ 
+  train_basis <- splines::ns(x, df = J)
+ 
+  as.vector(attributes(train_basis)$Boundary.knots)
+}
+```
+
+**Creating spline knots for both models**
+
+```{r}
+x4_spline_knots <- make_splines_training_knots(4, df_derived_scaled, as.character("x4"))
+x5_spline_knots <- make_splines_training_knots(4, df_derived_scaled, as.character("x5"))
+
+v1_spline_knots <- make_splines_training_knots(4, df_derived_scaled, as.character("v1"))
+v3_spline_knots <- make_splines_training_knots(4, df_derived_scaled, as.character("v3"))
+v4_spline_knots <- make_splines_training_knots(4, df_derived_scaled, as.character("v4"))
+v5_spline_knots <- make_splines_training_knots(4, df_derived_scaled, as.character("v5"))
+
+w_spline_knots <- make_splines_training_knots(4, df_derived_scaled, as.character("w"))
+z_spline_knots <- make_splines_training_knots(4, df_derived_scaled, as.character("z"))
+t_spline_knots <- make_splines_training_knots(4, df_derived_scaled, as.character("t"))
+```
+
+**Creating boundary knots for models**
+
+```{r}
+x4_bknots <- make_splines_boundary_knots(4, df_derived_scaled, as.character("x4"))
+x5_bknots <- make_splines_boundary_knots(4, df_derived_scaled, as.character("x5"))
+
+v1_bknots <- make_splines_boundary_knots(4, df_derived_scaled, as.character("v1"))
+v3_bknots <- make_splines_boundary_knots(4, df_derived_scaled, as.character("v3"))
+v4_bknots <- make_splines_boundary_knots(4, df_derived_scaled, as.character("v4"))
+v5_bknots <- make_splines_boundary_knots(4, df_derived_scaled, as.character("v5"))
+
+w_bknots <- make_splines_boundary_knots(4, df_derived_scaled, as.character("w"))
+z_bknots <- make_splines_boundary_knots(4, df_derived_scaled, as.character("z"))
+t_bknots <- make_splines_boundary_knots(4, df_derived_scaled, as.character("t"))
+```
+
+
+**Crating design matrix for model-8**
+
+```{r}
+Xviz_8 <- model.matrix( ~ splines::ns(z, knots = z_spline_knots, Boundary.knots = z_bknots) +
+                          splines::ns(w, knots = w_spline_knots, Boundary.knots = w_bknots) +
+                          splines::ns(t, knots = t_spline_knots, Boundary.knots = t_bknots) +
+                          splines::ns(x4, knots = x4_spline_knots, Boundary.knots = x4_bknots) +
+                          splines::ns(x5, knots = x5_spline_knots, Boundary.knots = x5_bknots) +
+                          splines::ns(v1, knots = v1_spline_knots, Boundary.knots = v1_bknots) +
+                          splines::ns(v3, knots = v3_spline_knots, Boundary.knots = v3_bknots) +
+                          splines::ns(v4, knots = v4_spline_knots, Boundary.knots = v4_bknots) +
+                          splines::ns(v5, knots = v5_spline_knots, Boundary.knots = v5_bknots) +
+                          m,
+                        data = viz_grid)
+```
+
+**Crating design matrix for model-12**
+
+```{r}
+Xviz_12 <- model.matrix( ~ (splines::ns(z, knots = z_spline_knots, Boundary.knots = z_bknots) +
+                          splines::ns(w, knots = w_spline_knots, Boundary.knots = w_bknots) +
+                          splines::ns(t, knots = t_spline_knots, Boundary.knots = t_bknots) +
+                          splines::ns(x4, knots = x4_spline_knots, Boundary.knots = x4_bknots) +
+                          splines::ns(x5, knots = x5_spline_knots, Boundary.knots = x5_bknots) +
+                          splines::ns(v1, knots = v1_spline_knots, Boundary.knots = v1_bknots) +
+                          splines::ns(v3, knots = v3_spline_knots, Boundary.knots = v3_bknots) +
+                          splines::ns(v4, knots = v4_spline_knots, Boundary.knots = v4_bknots) +
+                          splines::ns(v5, knots = v5_spline_knots, Boundary.knots = v5_bknots)) *
+                          m,
+                        data = viz_grid)
+```
+
+
+**Prediction on model-8**
+
+```{r}
+set.seed(7899) 
+
+post_pred_summary_8 <- summarize_lm_pred_from_laplace(laplace_8, Xviz_8, 5000)
+```
+
+**Prediction on model-12**
+
+```{r}
+set.seed(7899) 
+
+post_pred_summary_12 <- summarize_lm_pred_from_laplace(laplace_12, Xviz_12, 5000)
+```
+
+
+```{r}
+post_pred_summary_8 %>% 
+  left_join(viz_grid %>% tibble::rowid_to_column("pred_id"),
+            by = 'pred_id') %>% 
+  ggplot(mapping = aes(x = z)) +
+  geom_ribbon(mapping = aes(ymin = y_lwr,
+                            ymax = y_upr),
+              fill = 'orange') +
+  geom_ribbon(mapping = aes(ymin = mu_lwr,
+                            ymax = mu_upr),
+              fill = 'grey') +
+  geom_line(mapping = aes(y = mu_avg),
+            color = 'black') +
+  facet_grid(w~x5, labeller = "label_both") +
+  labs(y = 'y') +
+  theme_bw()
+```
+
+```{r}
+post_pred_summary_12 %>% 
+  left_join(viz_grid %>% tibble::rowid_to_column("pred_id"),
+            by = 'pred_id') %>% 
+  ggplot(mapping = aes(x = z)) +
+  geom_ribbon(mapping = aes(ymin = y_lwr,
+                            ymax = y_upr),
+              fill = 'orange') +
+  geom_ribbon(mapping = aes(ymin = mu_lwr,
+                            ymax = mu_upr),
+              fill = 'grey') +
+  geom_line(mapping = aes(y = mu_avg),
+            color = 'black') +
+  facet_grid(w~x5, labeller = "label_both") +
+  labs(y = 'y') +
+  theme_bw()
+```
+

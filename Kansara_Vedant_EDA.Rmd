@@ -1,0 +1,650 @@
+---
+aaatitle: "EDA"
+author: "VBK10"
+date: "2022-11-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load Packages
+
+```{r}
+library(tidyverse)
+```
+
+## Reading Data
+
+```{r}
+df <- readr::read_csv("fall2022_finalproject.csv", col_names = TRUE)
+```
+```{r}
+df %>% glimpse()
+```
+
+```{r}
+df %>% summary()
+```
+
+From the summary table we can see that the values if `x` are distributed between **0** and **1**.  
+The values if features starting with `v` are distributed between **0** and **10** except `v2` and `v4` which looks like distributed between **0** and **1**.
+The output response variable is distributed between **0** and **1**.  
+
+## Preparing Data
+
+##### Including the derived inputs with the dataset.
+
+```{r}
+df_derived <- df %>%
+  mutate(x5 = 1 - (x1 + x2 + x3 + x4),
+         w  = x2/(x3 + x4),
+         z = (x1 + x2) / (x4 + x5),
+         t = v1 * v2)
+```
+
+```{r}
+df_derived %>% glimpse()
+```
+
+```{r}
+df_derived %>% summary()
+```
+
+##### Converting the output response.  
+
+The `output` is bounded between **0** and **1**, and since we are using linear regression where the response variable is assumed to be a Gaussian, which has no bounds, we will transform the `output` feature.  
+
+```{r}
+df <- df %>%
+  mutate(y = boot::logit(output))
+
+df_derived <- df_derived %>% 
+  mutate(y = boot::logit(output))
+```
+
+##### Checchking Missing Values
+
+```{r, check numerically}
+sum(is.na(df))
+
+sum(is.na(df_derived))
+```
+
+**Checking missing values visually. **
+
+```{r, check visually for base features}
+visdat::vis_miss(df) 
+```
+
+```{r, check visually with derived features}
+visdat::vis_miss(df_derived) 
+```
+
+```{r, check data types visually with base features}
+visdat::vis_dat(df)
+```
+
+```{r, check data types visually with derived features}
+visdat::vis_dat(df_derived)
+```
+
+We can see that only one one column `M1` is categorical rest all other features are numeric.
+
+
+##### Chceking number of distint values of each feature
+```{r}
+df %>% purrr::map_dbl(n_distinct)
+```
+
+```{r}
+df_derived %>% purrr::map_dbl(n_distinct)
+```
+
+We can see that almost each row is a distinct value of a feature as we have `1252` rows in total and each feature has almost same number of unique values.  
+
+So first we will concentrate on the categorical variable `M`.  
+
+```{r, unique values of m numerically}
+df %>% count(m)
+```
+
+```{r, unique values of m visually}
+df %>% 
+  ggplot(mapping = aes(x = m)) +
+  geom_bar(color = "red", fill = "red", alpha = 0.4) + 
+  theme_bw()
+```
+
+We can see that the `m` is uniformly distributed.  
+Each unique value of `m` has almost same number of observation, so no one particular machine is driving/influencing the data.  
+
+##### Checking number of unique combinations of all inputs
+```{r}
+df %>% 
+  select(-output) %>%
+  distinct() %>%
+  dim()
+```
+
+```{r}
+df_derived %>% 
+  select(-output) %>%
+  distinct() %>%
+  dim()
+```
+
+There are 1252 unique combinations of input that corresponds to the number of rows of the dataframe, so no input combination is replicated.  
+We could also get this by checking the number of unique values of each feature. As each feature had close to `1252` unique values we could have assumed that there are no replications.  
+
+
+### Checking distribution of continuous features
+
+```{r}
+inputs <- c("x1","x2","x3","x4","v1","v2","v3","v4","v5","m")
+```
+
+
+```{r}
+df %>%
+  select(all_of(inputs)) %>%
+  select(-m) %>%
+  tibble::rowid_to_column() %>%
+  pivot_longer(!c("rowid")) %>%
+  ggplot(mapping = aes(x = value)) + 
+  geom_histogram(bins = 35) + 
+  facet_wrap(~name, scales = "free") + 
+  theme_bw()
+```
+
+We can see the variables except **v5**, **x2** looks like a bell-curve.    
+
+**We will also check the distribution of the derived inputs.**
+
+```{r}
+inputs_derived <-  c("x5","w","z","t")
+```
+
+
+```{r}
+df_derived %>%
+  select(all_of(inputs_derived)) %>%
+  tibble::rowid_to_column() %>%
+  pivot_longer(!c("rowid")) %>%
+  ggplot(mapping = aes(x = value)) + 
+  geom_histogram(bins = 35) + 
+  facet_wrap(~name, scales = "free") +
+  theme_bw()
+```
+
+All the derived inputs doesn't look like Gaussian curve so we will need to apply some sort of transformation before using this features.
+
+
+We can also check by plotting the density curve.
+
+```{r}
+df %>%
+  select(all_of(inputs)) %>%
+  select(-m) %>%
+  tibble::rowid_to_column() %>%
+  pivot_longer(!c("rowid")) %>%
+  ggplot(mapping = aes(x = value)) + 
+  geom_density() + 
+  facet_wrap(~name, scales = "free") + 
+  theme_bw()
+```
+
+```{r}
+df_derived %>%
+  select(all_of(inputs_derived)) %>%
+  tibble::rowid_to_column() %>%
+  pivot_longer(!c("rowid")) %>%
+  ggplot(mapping = aes(x = value)) + 
+  geom_density() + 
+  facet_wrap(~name, scales = "free") +
+  theme_bw()
+```
+
+### Performing Different Transformation to change the feature distribution to Gaussian type
+
+```{r}
+df %>%
+  select("x2", "v5") %>%
+  tibble::rowid_to_column() %>%
+  pivot_longer(!c("rowid")) %>%
+  ggplot(mapping = aes(x = log(value))) + 
+  geom_histogram(bins = 35) +
+  facet_wrap(~name, scales = "free") + 
+  theme_bw()
+```
+
+We see that even after performing log-transformation on variables `x2` and `v5` the distribution does not look "Gaussian-like".  
+
+```{r}
+df_derived %>%
+  select(all_of(inputs_derived)) %>%
+  tibble::rowid_to_column() %>%
+  pivot_longer(-rowid) %>%
+  ggplot(mapping = aes(x = log(value))) +
+  geom_histogram(bins = 35) +
+  facet_wrap(~name) + 
+  theme_bw()
+```
+
+Same is true for all the derived features. Even after performing log-transformation the distribution does not look like a Gaussian curve.  
+
+
+**Trying Box-Cox transformation**
+
+```{r}
+lambda_x2 <- forecast::BoxCox.lambda(df$x2, lower = -5, upper = 5)
+```
+
+```{r}
+ggplot(mapping = aes(x = forecast::BoxCox(df$x2, lambda = lambda_x2))) + 
+  geom_histogram(bins = 35) +
+  theme_bw()
+```
+
+```{r}
+lambda_v5 <- forecast::BoxCox.lambda(df$v5, lower = -5, upper = 5)
+```
+
+```{r}
+ggplot(mapping = aes(x = forecast::BoxCox(df$v5, lambda = lambda_v5))) + 
+  geom_histogram(bins = 35) +
+  theme_bw()
+```
+
+The Box-Cox transformation on `v5` still does not look anything like Gaussian so we will leave `v5` as it is and perform transformation on `x2`.  
+
+
+```{r}
+lambda_x5 <- forecast::BoxCox.lambda(df_derived$x5, lower = -5, upper = 5)
+lambda_w <- forecast::BoxCox.lambda(df_derived$w, lower = -5, upper = 5)
+lambda_z <- forecast::BoxCox.lambda(df_derived$z, lower = -5, upper = 5)
+lambda_t <- forecast::BoxCox.lambda(df_derived$t, lower = -5, upper = 5)
+```
+
+
+```{r}
+ggplot(mapping = aes(x = forecast::BoxCox(df_derived$x5, lambda = lambda_x5))) + 
+  geom_histogram(bins = 35) +
+  theme_bw()
+```
+
+```{r}
+ggplot(mapping = aes(x = forecast::BoxCox(df_derived$w, lambda = lambda_w))) + 
+  geom_histogram(bins = 35) +
+  theme_bw()
+```
+
+```{r}
+ggplot(mapping = aes(x = forecast::BoxCox(df_derived$z, lambda = lambda_z))) + 
+  geom_histogram(bins = 35) +
+  theme_bw()
+```
+```{r}
+ggplot(mapping = aes(x = forecast::BoxCox(df_derived$t, lambda = lambda_t))) + 
+  geom_histogram(bins = 35) +
+  theme_bw()
+```
+
+We will just transform `x2` and keep all the features as it is.  
+
+```{r}
+df_t <- df %>%
+  mutate(bc_x2 = forecast::BoxCox(x2, lambda = lambda_x2)) %>%
+  select(-x2)
+```
+
+```{r}
+df_derived_t <- df_derived %>%
+  mutate(bc_x2 = forecast::BoxCox(x2, lambda = lambda_x2)) %>%
+  select(-x2)
+```
+
+
+##### Scalling all the features
+
+```{r}
+df_t %>% 
+  tibble::rowid_to_column() %>% 
+  pivot_longer(-c("rowid","m"), names_to = "variable_name", values_to = "value") %>% 
+  ggplot(mapping = aes(x = variable_name, y = value)) +
+  geom_boxplot(fill = 'grey50', alpha = 0.5) +
+  stat_summary(fun.data = 'mean_se',
+               fun.args = list(mult = 2),
+               color = 'red') +
+  theme_bw()
+```
+
+```{r}
+df_derived_t %>% 
+  tibble::rowid_to_column() %>% 
+  pivot_longer(-c("rowid","m"), names_to = "variable_name", values_to = "value") %>% 
+  ggplot(mapping = aes(x = variable_name, y = value)) +
+  geom_boxplot(fill = 'grey50', alpha = 0.5) +
+  stat_summary(fun.data = 'mean_se',
+               fun.args = list(mult = 2),
+               color = 'red') +
+  theme_bw()
+```
+
+From the above figures we can see that the all features are not scaled.  
+
+
+```{r}
+df_scaled <- df_t %>% 
+  select(-output) %>%
+  select(-m) %>%
+  scale(center = TRUE, scale = TRUE) %>%
+  as.data.frame() %>%
+  mutate(m = df$m)
+```
+
+
+```{r}
+df_derived_scaled <- df_derived_t %>%
+  select(-m) %>%
+  select(-output) %>%
+  scale(center = TRUE, scale = TRUE) %>%
+  as.data.frame() %>%
+  mutate(m = df$m)
+```
+
+```{r}
+df_scaled %>% 
+  tibble::rowid_to_column() %>% 
+  pivot_longer(-c("rowid","m"), names_to = "variable_name", values_to = "value") %>% 
+  ggplot(mapping = aes(x = variable_name, y = value)) +
+  geom_boxplot(fill = 'grey50', alpha = 0.5) +
+  stat_summary(fun.data = 'mean_se',
+               fun.args = list(mult = 2),
+               color = 'red') +
+  theme_bw()
+```
+```{r}
+df_derived_scaled %>% 
+  tibble::rowid_to_column() %>% 
+  pivot_longer(-c("rowid","m"), names_to = "variable_name", values_to = "value") %>% 
+  ggplot(mapping = aes(x = variable_name, y = value)) +
+  geom_boxplot(fill = 'grey50', alpha = 0.5) +
+  stat_summary(fun.data = 'mean_se',
+               fun.args = list(mult = 2),
+               color = 'red') +
+  theme_bw()
+```
+
+We can see all the variables are now scaled.  
+
+
+**Grouping the continuous features based on the categorical feature**
+
+```{r}
+df_derived_t %>%
+  tibble::rowid_to_column() %>%
+  select(!c("output", "y")) %>%
+  pivot_longer(!c("rowid","m")) %>%
+  ggplot(mapping = aes(x = value)) +
+  geom_density(mapping = aes(color = m)) +
+  facet_wrap(~name, scales = "free") +
+  theme_bw()
+```
+
+We can see that there are no significant changes to the continuous features based on the categorical input **m**.
+
+we can also check the same using the box-plots.
+
+```{r}
+df_derived_t %>%
+  tibble::rowid_to_column() %>%
+  select(!c("output", "y")) %>%
+  pivot_longer(!c("rowid", "m")) %>%
+  ggplot(mapping = aes(x = name, y = value)) +
+  geom_boxplot(mapping = aes(group = interaction(name, m), fill = m, color = m), alpha = 0.3) + 
+  theme_bw()
+```
+
+**Checking the correlation between the continuous features**
+
+```{r}
+df_t %>%
+  select(!c("m", "output", "y")) %>%
+  cor() %>%
+  corrplot::corrplot(method = "number", type = "upper")
+```
+
+```{r}
+df_derived_t %>%
+  select(!c("m", "output", "y")) %>%
+  cor() %>%
+  corrplot::corrplot(method = "number", type = "upper")
+```
+
+We can see that **x5** and **z** are highly anti-correlated.  
+
+### Cehcking the distribution of the output repsonse y**
+
+```{r}
+df_t %>%
+  ggplot(mapping = aes(x = y)) + 
+  geom_histogram(bins = 35, color = "red", fill = "red", alpha = 0.35) + 
+  geom_vline(xintercept = quantile(df$y), linetype = "dashed", size = 1.2) + 
+  theme_bw()
+```
+
+
+We can see that the response `y` is almost normally distributed.  
+
+Checking the response y based on the categorical input m
+
+```{r}
+df %>%
+  ggplot(mapping = aes(x = m, y = y)) + 
+  geom_boxplot(mapping = aes(color = m)) + 
+  stat_summary(fun.data = "mean_se",
+               mapping = aes(color = m),
+               fun.args = list(mult = 2)) + 
+  theme_bw()
+```
+
+There seems to be no real difference to the value of response `y` based on the categorical input `m`.     
+
+```{r}
+df %>%
+  ggplot(mapping = aes(x = y)) +
+  geom_density(mapping = aes(color = m)) + 
+  theme_bw()
+```
+
+**Checking the relationship between repsonse with respect to the inputs.
+
+```{r}
+df_derived_t %>%
+  select(!c("output","m")) %>%
+  tibble::rowid_to_column() %>%
+  pivot_longer(!c("rowid", "y")) %>%
+  ggplot(mapping = aes(x = value, y = y)) +
+  geom_smooth(formula = y ~ x) +
+  facet_wrap(~name, scales = "free") + 
+  theme_bw()
+```
+
+Checking based on the categorical input **m**
+
+```{r}
+df_derived_t %>%
+  select(-output) %>%
+  tibble::rowid_to_column() %>%
+  pivot_longer(!c("rowid", "m", "y")) %>%
+  ggplot(mapping = aes(x = value, y = y)) +
+  geom_smooth(mapping = aes(group = m, color = m), formula = y ~ x, se = FALSE) +
+  facet_wrap(~name, scales = "free") +
+  theme_bw()
+```
+
+We cans see that there seems to be some non-linear relationships between the repsonse and the input features when categorized by **m**.  
+
+
+### Condidering the repsonse variable as a categorical feature
+
+```{r}
+df_cat <- df_derived_t %>%
+  mutate(outcome = ifelse(output < 0.33, "event", "non-event"),
+         outcome = factor(outcome, levels = c("event", "non-event"))) %>%
+  select(-y) %>%
+  select(-output)
+
+df_cat %>% glimpse()
+```
+
+**Checking the fraction of the outcome.**  
+
+```{r}
+df_cat %>%
+  count(outcome)
+```
+
+We will get the fraction of data when the event occurs.  
+
+```{r}
+sum(df_cat$outcome == 'event') / (sum(df_cat$outcome == 'event') + sum(df_cat$outcome == 'non-event'))
+```
+Therefore almost `35%` of the outcome feature is categorized as an `event` which is not as good as 50-50 split but is not that bad.  
+
+
+**Visualizing the outcome based on bar chart**
+
+```{r}
+df_cat %>%
+  ggplot(mapping = aes(x = outcome)) + 
+  geom_bar() + 
+  theme_bw()
+```
+
+**Visualizing the categorical input `m` based on the outcome**
+
+```{r}
+df_cat %>%
+  ggplot(mapping = aes(x = m)) +
+  geom_bar(mapping = aes(fill = outcome))
+```
+
+We can see the the outcome variable is distributed evenly along each machine.  
+There is no one machine which contains only `event` or `non-event`.  
+
+To get a better understanding of the graph we will show the proportions of events and non-event on each machine using a stacked bar chart.  
+
+```{r}
+df_cat %>%
+  ggplot(mapping = aes(x = m)) + 
+  geom_bar(mapping = aes(fill = outcome), position = 'fill')
+```
+
+We can see that machine D has slightly higher proportion of event but its almost similar for all the machines.
+
+
+**Now we will try to visualize the distribution of the continuous variables based on the outcome variable**
+
+```{r}
+df_cat %>%
+  select(-m) %>%
+  tibble::rowid_to_column() %>%
+  pivot_longer(!c("rowid", "outcome")) %>%
+  ggplot(mapping = aes(x = value)) + 
+  geom_histogram(mapping = aes(color = outcome), bins = 35) +
+  facet_wrap(~name, scales = 'free') + 
+  theme_bw()
+```
+
+
+```{r}
+df_cat %>%
+  select(-m) %>%
+  tibble::rowid_to_column() %>%
+  pivot_longer(!c("rowid", "outcome")) %>%
+  ggplot(mapping = aes(x = name, y = value)) + 
+  geom_boxplot(mapping = aes(group = interaction(name, outcome),
+                             fill = outcome, color = outcome), alpha = 0.25) + 
+  theme_bw()
+```
+
+```{r}
+df_cat_scaled <- df_cat %>%
+  select(-m) %>%
+  select(-outcome) %>%
+  scale(center = TRUE, scale = TRUE) %>%
+  as.data.frame() %>%
+  mutate(m = df_cat$m,
+         outcome = df_cat$outcome)
+```
+
+```{r}
+df_cat_scaled %>%
+  select(-m) %>%
+  tibble::rowid_to_column() %>%
+  pivot_longer(!c("rowid", "outcome")) %>%
+  ggplot(mapping = aes(x = name, y = value)) + 
+  geom_boxplot(mapping = aes(group = interaction(name, outcome),
+                             fill = outcome, color = outcome), alpha = 0.25) + 
+  theme_bw()
+```
+
+All the variables are now scaled.  
+
+```{r}
+df_cat_scaled %>%
+  select(-m) %>%
+  tibble::rowid_to_column() %>%
+  pivot_longer(!c("rowid", "outcome")) %>%
+  ggplot(mapping = aes(x = name, y = value)) + 
+  geom_boxplot(mapping = aes(group = interaction(name, outcome), fill = outcome, color = outcome), alpha = 0.1) +
+    stat_summary(fun.data = 'mean_se',
+               fun.args = list(mult = 2),
+               mapping = aes(group = interaction(name, outcome),
+                             color = outcome),
+               position = position_dodge(0.75)) + 
+  theme_bw()
+```
+
+
+```{r}
+df_cat_scaled %>%
+  select(-m) %>%
+  tibble::rowid_to_column() %>%
+  pivot_longer(!c("rowid", "outcome")) %>%
+  ggplot(mapping = aes(x = name, y = value)) + 
+   stat_summary(fun.data = 'mean_se',
+               fun.args = list(mult = 2),
+               mapping = aes(group = interaction(name, outcome),
+                             color = outcome),
+               position = position_dodge(0.75)) + 
+  theme_bw()
+```
+
+```{r}
+df_cat_scaled %>%
+  select(-m) %>%
+  tibble::rowid_to_column() %>%
+  pivot_longer(!c("rowid", "outcome")) %>%
+  ggplot(mapping = aes(x = value)) + 
+  geom_density(mapping = aes(group = outcome, color = outcome)) + 
+  facet_wrap(~name, scales = "free") + 
+  theme_bw()
+```
+
+
+
+```{r}
+df_cat_scaled %>%
+  select(-outcome) %>%
+  tibble::rowid_to_column() %>%
+  pivot_longer(!c("rowid", "m")) %>%
+  ggplot(mapping = aes(x = name, y = value)) + 
+  geom_boxplot(mapping = aes(group = interaction(name, m), fill = m, color = m), alpha = 0.1) + 
+  theme_bw()
+```
+
+

@@ -1,0 +1,2151 @@
+---
+title: "Regression"
+author: "Vedant Kansara"
+date: "2022-12-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load Packages
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+library(tidymodels)
+```
+
+## Read Data
+
+```{r}
+df <- readr::read_csv('fall2022_finalproject.csv', col_names = TRUE)
+```
+
+**Making data frame for derived inputs**
+
+```{r}
+df_derived <- df %>%
+  mutate(x5 = 1 - (x1 + x2 + x3 + x4),
+         w = x2 / (x3 + x4),
+         z = (x1 + x2) / (x4 + x5),
+         t = v1 * v2)
+```
+
+
+**Changing the output response**
+
+```{r}
+df <- df %>%
+  mutate(y = boot::logit(output)) %>%
+  select(-output)
+```
+
+```{r}
+df_derived <- df_derived %>%
+  mutate(y = boot::logit(output)) %>%
+  select(-output)
+```
+
+
+### Predictive MOdelling
+
+```{r}
+set.seed(7899)
+
+cv_folds_1 <- vfold_cv(df, v = 10, repeats = 5, strata = y)
+
+cv_folds_2 <- vfold_cv(df_derived, v = 10, repeats = 5, strata = y)
+```
+
+```{r}
+my_metrics <- metric_set(rmse, rsq, mae)
+```
+
+**Defining linear model engine**
+
+```{r}
+lm_spec <- linear_reg() %>%
+  set_engine("lm")
+```
+
+
+##### Using Base Features Set
+
+**Model-1 Linear Additive Features**
+
+```{r}
+bp_stan_base <- recipe(y ~ ., data = df) %>%
+  step_BoxCox(x2) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors())
+```
+
+```{r}
+lm_mod1_wflow <- workflow() %>%
+  add_model(lm_spec) %>%
+  add_recipe(bp_stan_base)
+```
+
+```{r}
+lm_mod1 <- lm_mod1_wflow %>% 
+  fit_resamples(cv_folds_1, metrics = my_metrics)
+```
+
+```{r}
+lm_mod1 %>% collect_metrics()
+```
+
+**Model-2 Interaction of categorical input with all continuous inputs**
+
+```{r}
+bp_int_base <- bp_stan_base %>%
+  step_dummy(m) %>% 
+  step_interact( ~ starts_with("x"):starts_with("m")) %>%
+  step_interact( ~ starts_with("v"):starts_with("m"))
+```
+
+```{r}
+lm_mod2_wflow <- workflow() %>%
+  add_model(lm_spec) %>%
+  add_recipe(bp_int_base)
+```
+
+```{r}
+lm_mod2 <- lm_mod2_wflow %>%
+  fit_resamples(cv_folds_1, metrics = my_metrics)
+```
+
+```{r}
+lm_mod2 %>% collect_metrics()
+```
+
+**Model-3 All pair-wise interaction of the continuous inputs**
+
+```{r}
+bp_pair_base <- recipe(y ~ x1 + x2 + x3 + x4 + v1 + v2 + v3 + v4 + v5, data = df) %>%
+  step_BoxCox(x2) %>%
+  step_center(all_predictors()) %>%
+  step_scale(all_predictors()) %>%
+  step_interact( ~ (all_numeric_predictors():all_numeric_predictors()))
+```
+
+
+```{r}
+lm_mod3_wfolow <- workflow() %>%
+  add_model(lm_spec) %>%
+  add_recipe(bp_pair_base)
+```
+
+```{r}
+lm_mod3 <- lm_mod3_wfolow %>%
+  fit_resamples(cv_folds_1, metrics = my_metrics)
+```
+
+```{r}
+lm_mod3 %>% collect_metrics()
+```
+
+##### Using Expanded Features Set
+
+**Model-4 Linear Additive Features**
+
+```{r}
+bp_stan_exp <- recipe(y ~ x4 + x5 + v1 + v3 + v4 + v5 + w + z + t + m, data = df_derived) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors())
+```
+
+```{r}
+lm_mod4_wflow <- workflow() %>%
+  add_model(lm_spec) %>%
+  add_recipe(bp_stan_exp)
+```
+
+```{r}
+lm_mod4 <- lm_mod4_wflow %>%
+  fit_resamples(cv_folds_2, metrics = my_metrics)
+```
+
+```{r}
+lm_mod4 %>% collect_metrics()
+```
+
+**Model-5 Interaction of the categorical input with all continuous inputs**
+
+```{r}
+bp_int_exp <- bp_stan_exp %>%
+  step_dummy(m) %>%
+  step_interact( ~ starts_with("x") : starts_with("m")) %>%
+  step_interact( ~ starts_with("v") : starts_with("m")) %>%
+  step_interact( ~ w : starts_with("m")) %>%
+  step_interact( ~ z : starts_with("m")) %>%
+  step_interact( ~ t : starts_with("m"))
+```
+
+```{r}
+lm_mod5_wflow <- workflow() %>%
+  add_model(lm_spec) %>%
+  add_recipe(bp_int_exp)
+```
+
+```{r}
+lm_mod5 <- lm_mod5_wflow %>%
+  fit_resamples(cv_folds_2, metrics = my_metrics)
+```
+
+```{r}
+lm_mod5 %>% collect_metrics()
+```
+
+
+**Model-6 Pair-wise interaction between continuous features**
+
+```{r}
+bp_pair_exp <- recipe(y ~ x4 + x5 + v1 + v3 + v4 + v5 + w + z + t, data = df_derived) %>%
+  step_scale(all_predictors()) %>%
+  step_center(all_predictors()) %>%
+  step_interact( ~ (all_predictors() : all_predictors()))
+```
+
+```{r}
+lm_mod6_wflow <- workflow() %>%
+  add_model(lm_spec) %>%
+  add_recipe(bp_pair_exp)
+```
+
+```{r}
+lm_mod6 <- lm_mod6_wflow %>%
+  fit_resamples(cv_folds_2, metrics = my_metrics)
+```
+
+```{r}
+lm_mod6 %>% collect_metrics()
+```
+
+##### Linear basis Function Models
+**Model-7 Additive natural splines with base features**
+
+```{r}
+bp_spline_base <- recipe(y ~ ., data = df) %>%
+  step_BoxCox(x2) %>%
+  step_scale(all_numeric_predictors()) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_ns(all_numeric_predictors(), deg_free = 4) %>%
+  step_dummy(m)
+```
+
+```{r}
+lm_mod7_wflow <- workflow() %>%
+  add_model(lm_spec) %>%
+  add_recipe(bp_spline_base)
+```
+
+```{r}
+lm_mod7 <- lm_mod7_wflow %>%
+  fit_resamples(cv_folds_1, metrics = my_metrics)
+```
+
+```{r}
+lm_mod7 %>% collect_metrics()
+```
+
+**Model-8 Additive natural splines with expanded features**
+
+
+```{r}
+bp_spline_exp <- recipe(y ~ x4 + x5 + v1 + v3 + v4 + v5 + w + z + t + m, data = df_derived) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors()) %>%
+  step_ns(all_numeric_predictors(), deg_free = 4) %>%
+  step_dummy(m)
+```
+
+```{r}
+lm_mod8_wflow <- workflow() %>%
+  add_model(lm_spec) %>%
+  add_recipe(bp_spline_exp)
+```
+
+```{r}
+lm_mod8 <- lm_mod8_wflow %>%
+  fit_resamples(cv_folds_2, metrics = my_metrics)
+```
+
+```{r}
+lm_mod8 %>% collect_metrics()
+```
+
+**Model-9 Additive polynomials with base features**
+
+```{r}
+bp_poly_base <- recipe(y ~ ., data = df) %>%
+  step_BoxCox(x2) %>% 
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors()) %>%
+  step_poly(all_numeric_predictors(), degree = 3)
+```
+
+```{r}
+lm_mod9_wflow <- workflow() %>%
+  add_model(lm_spec) %>%
+  add_recipe(bp_poly_base)
+```
+
+```{r}
+lm_mod9 <- lm_mod9_wflow %>%
+  fit_resamples(cv_folds_1, metrics = my_metrics)
+```
+
+```{r}
+lm_mod9 %>% collect_metrics()
+```
+
+**Model-10 Additive polynomials with expanded features**
+
+```{r}
+bp_poly_exp <- recipe(y ~ x4 + x5 + v1 + v3 + v4 + v5 + w + z + t + m, data = df_derived) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors()) %>%
+  step_poly(all_numeric_predictors(), degree = 3) %>%
+  step_dummy(m)
+```
+
+```{r}
+lm_mod10_wflow <- workflow() %>%
+  add_model(lm_spec) %>%
+  add_recipe(bp_poly_exp)
+```
+
+```{r}
+lm_mod10 <- lm_mod10_wflow %>%
+  fit_resamples(cv_folds_2, metrics = my_metrics)
+```
+
+```{r}
+lm_mod10 %>% collect_metrics()
+```
+
+**Model-11 Interaction of categorical feature with natural spline continuous features using base set**
+
+```{r}
+bp_ns_int_base <- recipe(y ~ ., data = df) %>%
+  step_BoxCox(x2) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors()) %>%
+  step_ns(all_numeric_predictors(), deg_free = 4) %>%
+  step_dummy(m) %>%
+  step_interact( ~ (contains("ns") : starts_with("m")))
+```
+
+```{r}
+lm_mod11_wflow <- workflow() %>%
+  add_model(lm_spec) %>%
+  add_recipe(bp_ns_int_base)
+```
+
+```{r}
+lm_mod11 <- lm_mod11_wflow %>%
+  fit_resamples(cv_folds_1, metrics = my_metrics)
+```
+
+```{r}
+lm_mod11 %>% collect_metrics()
+```
+
+**Model-12 Interaction of categorical feature with natural spline continuous features using expanded set**
+
+```{r}
+bp_ns_int_exp <- recipe(y ~ x4 + x5 + v1 + v3 + v4 + v5 + w + z + t + m, data = df_derived) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors()) %>%
+  step_ns(all_numeric_predictors(), deg_free = 4) %>%
+  step_dummy(m) %>%
+  step_interact( ~ (contains("ns") : starts_with("m")))
+```
+
+```{r}
+lm_mod12_wflow <- workflow() %>%
+  add_model(lm_spec) %>%
+  add_recipe(bp_ns_int_exp)
+```
+
+```{r}
+lm_mod12 <- lm_mod12_wflow %>%
+  fit_resamples(cv_folds_2, metrics = my_metrics) 
+```
+
+```{r}
+lm_mod12 %>% collect_metrics()
+```
+
+### Linear methods comparison
+
+```{r}
+lm_cv_results <- lm_mod1 %>% collect_metrics() %>% 
+  mutate(wflow_id = "mod_01") %>%
+  bind_rows(lm_mod2 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_02")) %>%
+  bind_rows(lm_mod3 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_03"))%>%
+  bind_rows(lm_mod4 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_04"))%>%
+  bind_rows(lm_mod5 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_05"))%>%
+  bind_rows(lm_mod6 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_06"))%>%
+  bind_rows(lm_mod7 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_07"))%>%
+  bind_rows(lm_mod8 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_08"))%>%
+  bind_rows(lm_mod9 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_09"))%>%
+  bind_rows(lm_mod10 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_10"))%>%
+  bind_rows(lm_mod11 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_11"))%>%
+  bind_rows(lm_mod12 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_12"))
+```
+
+
+```{r}
+lm_cv_results %>%
+  ggplot(mapping = aes(x = wflow_id)) +
+  geom_linerange(mapping = aes(ymin = mean - 2*std_err,
+                               ymax = mean + 2*std_err,
+                               group = interaction(.metric, wflow_id)),
+                 color = "grey50", size = 0.75) +
+  geom_linerange(mapping = aes(ymin = mean - 1*std_err,
+                               ymax = mean + 1*std_err,
+                               group = interaction(.metric, wflow_id)),
+                 color = "red", size = 1.45) + 
+  geom_point(mapping = aes(y = mean),
+             color = "red", size = 3.1) +
+  facet_wrap(~.metric, scales = "free_y", nrow = 1) + 
+  labs(x = "", y = "performance metric") + 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) 
+```
+
+According to all matrices that is **MAE**, **RMSE**, and **RSQ** model-8 that is **Additive natural splines with expanded features** is the best model.  
+
+
+##### PLotting the coefficient summary of top-3 models
+
+**First fitting the top-3 models**
+
+```{r}
+final_lm_mod8 <- lm_mod8_wflow %>% 
+  fit(df_derived)
+```
+
+
+```{r}
+final_lm_mod10 <- lm_mod10_wflow %>% 
+  fit(df_derived)
+```
+
+
+```{r}
+final_lm_mod12 <- lm_mod12_wflow %>% 
+  fit(df_derived)
+```
+
+
+**Plotting the coef-plot for all 3 models**
+
+```{r}
+tidy(final_lm_mod8) %>%
+     ggplot(mapping = aes(x = term)) +
+     geom_hline(yintercept = 0, color = "grey", linetype = "dashed") +
+     geom_point(mapping = aes(y = estimate)) +
+     geom_linerange(mapping = aes(ymin = estimate - 2*std.error,
+                                  ymax = estimate + 2*std.error,
+                                  group = term)) + 
+     labs(x = 'feature', y = 'coefficient value') +
+     coord_flip() +
+     theme_bw()
+```
+
+From the above figure z and x5 looks most important features.  
+
+
+```{r}
+tidy(final_lm_mod10) %>%
+     ggplot(mapping = aes(x = term)) +
+     geom_hline(yintercept = 0, color = "grey", linetype = "dashed") +
+     geom_point(mapping = aes(y = estimate)) +
+     geom_linerange(mapping = aes(ymin = estimate - 2*std.error,
+                                  ymax = estimate + 2*std.error,
+                                  group = term)) + 
+     labs(x = 'feature', y = 'coefficient value') +
+     coord_flip() +
+     theme_bw()
+```
+
+From this figure too z and x5looks most important.  
+
+```{r}
+tidy(final_lm_mod12) %>%
+     ggplot(mapping = aes(x = term)) +
+     geom_hline(yintercept = 0, color = "grey", linetype = "dashed") +
+     geom_point(mapping = aes(y = estimate)) +
+     geom_linerange(mapping = aes(ymin = estimate - 2*std.error,
+                                  ymax = estimate + 2*std.error,
+                                  group = term)) + 
+     labs(x = 'feature', y = 'coefficient value') +
+     coord_flip() +
+     theme_bw()
+```
+
+Again z and x5 looks the most important features.  
+
+### Elastic Net
+
+# NOn - Linear Models
+
+##### Elastic Net
+
+**Fitting a Lasso model to get idea about the intervals of the tuning parameter**
+
+```{r}
+lasso_for_fit <- linear_reg(penalty = 0.1, mixture = 1) %>%
+  set_engine("glmnet",
+             intercept = TRUE, standardize = TRUE)
+```
+
+```{r}
+bp_lasso <- bp_spline_exp
+```
+
+
+```{r}
+lasso_fit_wflow <- workflow() %>%
+  add_model(lasso_for_fit) %>%
+  add_recipe(bp_lasso)
+```
+
+```{r}
+lasso_fit <- lasso_fit_wflow %>%
+  fit(df_derived)
+```
+
+```{r}
+lasso_fit %>% extract_fit_parsnip() %>%
+  pluck("fit") %>% 
+  plot(xvar = "lambda")
+```
+
+```{r}
+lasso_fit %>% extract_fit_parsnip() %>%
+  pluck("fit") %>% 
+  broom:::tidy.glmnet() %>% 
+  distinct(lambda) %>% 
+  arrange(lambda) %>% 
+  pull() %>% 
+  log() %>% 
+  summary()
+```
+
+```{r}
+my_lambda <- penalty(range = c(-8, 1), trans = log_trans())
+
+my_alpha <- mixture(range = c(0.1, 1.0))
+
+enet_grid <- grid_regular(my_lambda, my_alpha,
+                          levels = c(penalty = 75, mixture = 5))
+```
+
+
+```{r}
+enet_spec <- linear_reg(penalty = tune(), mixture = tune()) %>%
+  set_engine("glmnet",
+             intercept = TRUE, standardize = TRUE,
+             path_values = exp(seq(-8, 1, length.out = 75)))
+```
+
+
+```{r}
+bp_enet <- recipe(y ~., data = df) %>%
+  step_BoxCox(x2) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors()) %>%
+  step_dummy(m) %>%
+  step_interact( ~ all_numeric_predictors() : all_numeric_predictors())
+```
+
+
+```{r}
+enet_wflow <- workflow() %>%
+  add_model(enet_spec) %>%
+  add_recipe(bp_enet)
+```
+
+
+```{r}
+if(parallel::detectCores(logical=FALSE) > 3){
+  library(doParallel)
+  
+  num_cores <- parallel::detectCores(logical=FALSE)
+  cl <- makePSOCKcluster(num_cores - 1)
+  registerDoParallel(cl)
+}
+```
+
+```{r}
+start_enet <- Sys.time()
+
+enet_res <- tune_grid(
+  enet_wflow,
+  resamples = cv_folds_1,
+  grid = enet_grid,
+  metrics = my_metrics
+)
+
+finish_enet <- Sys.time()
+
+finish_enet - start_enet
+```
+
+
+**We will visualize the results**
+
+```{r}
+enet_res %>% collect_metrics() %>%
+  ggplot(mapping = aes(x = log(penalty))) + 
+  geom_ribbon(mapping = aes(ymin = mean - std_err,
+                            ymax = mean + std_err,
+                            group = interaction(mixture, .metric),
+                            fill = as.factor(mixture)),
+              alpha = 0.35) + 
+  geom_line(mapping = aes(y = mean,
+                          group = interaction(mixture, .metric),
+                          color = as.factor(mixture)),
+            size = 1.15) +
+  facet_wrap(~.metric, scales = "free_y", ncol = 1) +
+  scale_fill_viridis_d("mixing fraction") + 
+  scale_color_viridis_d("mixing fraction") +
+  labs(y = "performance metric value") +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+Checking which tuning parameter is the best according to **rmse**
+
+```{r}
+enet_res %>% select_best(metric = "rmse")
+```
+
+Since the value of mixture is one our model is a Lasso model.  
+
+
+Tuning parameter based on 1-standard error rule.
+
+```{r}
+enet_res %>% 
+  select_by_one_std_err(desc(penalty), desc(mixture), metric = "rmse")
+```
+
+```{r}
+enet_res %>% collect_metrics() %>% 
+  filter(.metric %in% c("rmse")) %>% 
+  ggplot(mapping = aes(x = log(penalty))) +
+  geom_ribbon(mapping = aes(ymin = mean - std_err,
+                            ymax = mean + std_err,
+                            group = interaction(mixture, .metric),
+                            fill = as.factor(mixture)),
+              alpha = 0.35) +
+  geom_line(mapping = aes(y = mean,
+                          group = interaction(mixture, .metric),
+                          color = as.factor(mixture)),
+            size = 1.15) +
+  geom_vline(data = enet_res %>% select_best("rmse"),
+             mapping = aes(xintercept = log(penalty)),
+             color = 'red', linetype = 'dashed', size = 1.2) +
+  geom_vline(data = enet_res %>% 
+               select_by_one_std_err(desc(penalty), desc(mixture), metric = 'rmse'),
+             mapping = aes(xintercept = log(penalty)),
+             color = 'orange', linetype = 'dashed', size = 1.2) +
+  facet_wrap(~.metric, scales = "free_y", ncol = 1) +
+  scale_fill_viridis_d("mixing fraction") +
+  scale_color_viridis_d("mixing fraction") +
+  labs(y = 'performance metric value') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+```{r}
+enet_best_rmse_params <- enet_res %>% 
+  select_by_one_std_err(desc(penalty), desc(mixture), metric = 'rmse') %>% 
+  select(all_of(names(enet_grid)))
+
+final_enet_wflow <- enet_wflow %>% 
+  finalize_workflow(enet_best_rmse_params)
+```
+
+
+```{r}
+final_enet_res <- final_enet_wflow %>% 
+  fit_resamples(cv_folds_1,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+```{r}
+final_enet_res %>% collect_metrics()
+```
+
+```{r}
+final_enet_fit <- final_enet_wflow %>% fit(df)
+```
+
+
+```{r}
+final_enet_fit %>% 
+  tidy() %>% 
+  filter(!stringr::str_detect(term, "Intercept")) %>% 
+  summarise(num_zero = sum(estimate == 0),
+            fraction_zero = mean(estimate == 0))
+```
+
+```{r}
+all_results <- lm_mod1 %>% collect_metrics() %>% 
+  mutate(wflow_id = "mod_01") %>%
+  bind_rows(lm_mod4 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_04")) %>%
+  bind_rows(lm_mod8 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_08")) %>%
+  bind_rows(lm_mod10 %>% collect_metrics() %>%
+              mutate(wflow_id = "mod_10")) %>%
+  bind_rows(final_enet_res %>% collect_metrics() %>%
+              mutate(wflow_id = "enet"))
+```
+
+
+
+**Elastic net using the mod-8**
+
+```{r}
+enet_wflow_lm8 <- workflow() %>%
+  add_model(enet_spec) %>%
+  add_recipe(bp_spline_exp)
+```
+
+
+```{r}
+start_enet <- Sys.time()
+
+enet_lm8_res <- tune_grid(
+  enet_wflow_lm8,
+  resamples = cv_folds_2,
+  grid = enet_grid,
+  metrics = my_metrics
+)
+
+finish_enet <- Sys.time()
+
+finish_enet - start_enet
+```
+
+**We will visualize the results**
+
+```{r}
+enet_lm8_res %>% collect_metrics() %>%
+  ggplot(mapping = aes(x = log(penalty))) + 
+  geom_ribbon(mapping = aes(ymin = mean - std_err,
+                            ymax = mean + std_err,
+                            group = interaction(mixture, .metric),
+                            fill = as.factor(mixture)),
+              alpha = 0.35) + 
+  geom_line(mapping = aes(y = mean,
+                          group = interaction(mixture, .metric),
+                          color = as.factor(mixture)),
+            size = 1.15) +
+  facet_wrap(~.metric, scales = "free_y", ncol = 1) +
+  scale_fill_viridis_d("mixing fraction") + 
+  scale_color_viridis_d("mixing fraction") +
+  labs(y = "performance metric value") +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+Checking which tuning parameter is the best according to **rmse**
+
+```{r}
+enet_lm8_res %>% select_best(metric = "rmse")
+```
+
+Since the value of mixture is one our model is a Lasso model.  
+
+
+Tuning parameter based on 1-standard error rule.
+
+```{r}
+enet_lm8_res %>% 
+  select_by_one_std_err(desc(penalty), desc(mixture), metric = "rmse")
+```
+
+```{r}
+enet_lm8_res %>% collect_metrics() %>% 
+  filter(.metric %in% c("rmse")) %>% 
+  ggplot(mapping = aes(x = log(penalty))) +
+  geom_ribbon(mapping = aes(ymin = mean - std_err,
+                            ymax = mean + std_err,
+                            group = interaction(mixture, .metric),
+                            fill = as.factor(mixture)),
+              alpha = 0.35) +
+  geom_line(mapping = aes(y = mean,
+                          group = interaction(mixture, .metric),
+                          color = as.factor(mixture)),
+            size = 1.15) +
+  geom_vline(data = enet_lm8_res %>% select_best("rmse"),
+             mapping = aes(xintercept = log(penalty)),
+             color = 'red', linetype = 'dashed', size = 1.2) +
+  geom_vline(data = enet_lm8_res %>% 
+               select_by_one_std_err(desc(penalty), desc(mixture), metric = 'rmse'),
+             mapping = aes(xintercept = log(penalty)),
+             color = 'orange', linetype = 'dashed', size = 1.2) +
+  facet_wrap(~.metric, scales = "free_y", ncol = 1) +
+  scale_fill_viridis_d("mixing fraction") +
+  scale_color_viridis_d("mixing fraction") +
+  labs(y = 'performance metric value') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+```{r}
+enet_lm8_best_rmse_params <- enet_lm8_res %>%
+  select_by_one_std_err(desc(penalty), desc(mixture), metric = "rmse") %>%
+  select(all_of(names(enet_grid)))
+
+final_enet_lm8_wflow <- enet_wflow_lm8 %>%
+  finalize_workflow(enet_lm8_best_rmse_params)
+```
+
+
+```{r}
+final_lm8_enet_res <- final_enet_lm8_wflow %>%
+  fit_resamples(cv_folds_2,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+final_lm8_enet_res %>% collect_metrics()
+```
+
+```{r}
+final_lm8_enet_fit <- final_enet_lm8_wflow %>% fit(df_derived)
+```
+
+```{r}
+final_lm8_enet_fit %>% 
+  tidy() %>% 
+  filter(!stringr::str_detect(term, "Intercept")) %>% 
+  summarise(num_zero = sum(estimate == 0),
+            fraction_zero = mean(estimate == 0))
+```
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_lm8_enet_res %>% collect_metrics() %>%
+              mutate(wflow_id = "enet_8"))
+```
+
+
+**Elastic net using the mode-10**
+
+```{r}
+enet_wflow_lm10 <- workflow() %>%
+  add_model(enet_spec) %>%
+  add_recipe(bp_poly_exp)
+```
+
+
+```{r}
+start_enet <- Sys.time()
+
+enet_lm10_res <- tune_grid(
+  enet_wflow_lm10,
+  resamples = cv_folds_2,
+  grid = enet_grid,
+  metrics = my_metrics
+)
+
+finish_enet <- Sys.time()
+
+finish_enet - start_enet
+```
+
+**We will visualize the results**
+
+```{r}
+enet_lm10_res %>% collect_metrics() %>%
+  ggplot(mapping = aes(x = log(penalty))) + 
+  geom_ribbon(mapping = aes(ymin = mean - std_err,
+                            ymax = mean + std_err,
+                            group = interaction(mixture, .metric),
+                            fill = as.factor(mixture)),
+              alpha = 0.35) + 
+  geom_line(mapping = aes(y = mean,
+                          group = interaction(mixture, .metric),
+                          color = as.factor(mixture)),
+            size = 1.15) +
+  facet_wrap(~.metric, scales = "free_y", ncol = 1) +
+  scale_fill_viridis_d("mixing fraction") + 
+  scale_color_viridis_d("mixing fraction") +
+  labs(y = "performance metric value") +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+Checking which tuning parameter is the best according to **rmse**
+
+```{r}
+enet_lm10_res %>% select_best(metric = "rmse")
+```
+
+Since the value of mixture is one our model is a Lasso model.  
+
+
+Tuning parameter based on 1-standard error rule.
+
+```{r}
+enet_lm10_res %>% 
+  select_by_one_std_err(desc(penalty), desc(mixture), metric = "rmse")
+```
+
+```{r}
+enet_lm10_res %>% collect_metrics() %>% 
+  filter(.metric %in% c("rmse")) %>% 
+  ggplot(mapping = aes(x = log(penalty))) +
+  geom_ribbon(mapping = aes(ymin = mean - std_err,
+                            ymax = mean + std_err,
+                            group = interaction(mixture, .metric),
+                            fill = as.factor(mixture)),
+              alpha = 0.35) +
+  geom_line(mapping = aes(y = mean,
+                          group = interaction(mixture, .metric),
+                          color = as.factor(mixture)),
+            size = 1.15) +
+  geom_vline(data = enet_lm10_res %>% select_best("rmse"),
+             mapping = aes(xintercept = log(penalty)),
+             color = 'red', linetype = 'dashed', size = 1.2) +
+  geom_vline(data = enet_lm10_res %>% 
+               select_by_one_std_err(desc(penalty), desc(mixture), metric = 'rmse'),
+             mapping = aes(xintercept = log(penalty)),
+             color = 'orange', linetype = 'dashed', size = 1.2) +
+  facet_wrap(~.metric, scales = "free_y", ncol = 1) +
+  scale_fill_viridis_d("mixing fraction") +
+  scale_color_viridis_d("mixing fraction") +
+  labs(y = 'performance metric value') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+```{r}
+enet_lm10_best_roc_auc_params <- enet_lm10_res %>%
+  select_by_one_std_err(desc(penalty), desc(mixture), metric = "rmse") %>%
+  select(all_of(names(enet_grid)))
+
+final_enet_lm10_wflow <- enet_wflow_lm10 %>%
+  finalize_workflow(enet_lm10_best_roc_auc_params)
+```
+
+
+```{r}
+final_lm10_enet_res <- final_enet_lm10_wflow %>%
+  fit_resamples(cv_folds_2,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+final_lm10_enet_res %>% collect_metrics()
+```
+
+```{r}
+final_lm10_enet_fit <- final_enet_lm10_wflow %>% fit(df_derived)
+```
+
+
+```{r}
+final_lm10_enet_fit %>% 
+  tidy() %>% 
+  filter(!stringr::str_detect(term, "Intercept")) %>% 
+  summarise(num_zero = sum(estimate == 0),
+            fraction_zero = mean(estimate == 0))
+```
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_lm10_enet_res %>% collect_metrics() %>%
+              mutate(wflow_id = "enet_10"))
+```
+
+
+# Neural Network
+
+```{r}
+nnet_spec <- mlp(hidden_units = tune(), penalty = tune(), epochs = 2000) %>% 
+  set_engine("nnet", MaxNWts = 2500, trace=FALSE) %>% 
+  set_mode("regression")
+```
+
+
+```{r}
+nnet_grid <- crossing(hidden_units = c(5, 10, 15, 25, 30),
+                      penalty = 10^(seq(-10, 1.75, length.out = 21)))
+
+nnet_grid %>% glimpse()
+```
+
+**Using Base Features**
+
+```{r}
+nnet_wflow_base <- workflow() %>% 
+  add_model(nnet_spec) %>% 
+  add_recipe(bp_stan_base)
+```
+
+
+```{r, eval=FALSE}
+start_nnet <- Sys.time() 
+
+set.seed(7899)
+nnet_res_base <- tune_grid(
+  nnet_wflow_base,
+  resamples = cv_folds_1,
+  grid = nnet_grid,
+  metrics = my_metrics
+)
+
+finish_nnet <- Sys.time()
+
+finish_nnet - start_nnet
+```
+
+```{r, eval=FALSE}
+nnet_res_base %>% readr::write_rds("neural_network_base_model.rds")
+```
+
+
+```{r}
+nnet_res_base <- readr::read_rds("neural_network_base_model.rds")
+```
+
+
+```{r}
+nnet_res_base %>% collect_metrics() %>% 
+  ggplot(mapping = aes(x = log10(penalty))) +
+  geom_ribbon(mapping = aes(group = interaction(hidden_units, .metric),
+                            fill = as.factor(hidden_units),
+                            ymin = mean - std_err,
+                            ymax = mean + std_err),
+              alpha = 0.4) +
+  geom_line(mapping = aes(group = interaction(hidden_units, .metric),
+                          color = as.factor(hidden_units),
+                          y = mean),
+            size = 1.2) +
+  facet_wrap(~.metric, scales = "free_y", nrow = 1) +
+  scale_fill_viridis_d("Hidden units") +
+  scale_color_viridis_d("Hidden units") +
+  labs(y = 'performance metric value') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+**Selecting Tuning Parameters that maximize rmse**
+
+```{r}
+nnet_base_best_max_acc_params <- nnet_res_base %>% 
+  select_best(metric = 'rmse')
+
+nnet_base_best_max_acc_params
+```
+
+
+```{r}
+final_nnet_base_wflow <- nnet_wflow_base %>% 
+  finalize_workflow(nnet_base_best_max_acc_params)
+
+final_nnet_fit_base <- final_nnet_base_wflow %>% fit(df)
+```
+
+**Final neural network workflow**
+
+```{r}
+final_nnet_base_res <- final_nnet_base_wflow %>% 
+  fit_resamples(cv_folds_1,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_nnet_base_res %>% collect_metrics() %>%
+              mutate(wflow_id = "nnet_base"))
+```
+
+
+**Using the expanded set of features**
+
+```{r}
+nnet_wflow_exp <- workflow() %>% 
+  add_model(nnet_spec) %>% 
+  add_recipe(bp_stan_exp)
+```
+
+
+```{r, eval=FALSE}
+start_nnet <- Sys.time() 
+
+set.seed(7899)
+nnet_res_exp <- tune_grid(
+  nnet_wflow_exp,
+  resamples = cv_folds_2,
+  grid = nnet_grid,
+  metrics = my_metrics
+)
+
+finish_nnet <- Sys.time()
+
+finish_nnet - start_nnet
+```
+
+
+```{r, eval=FALSE}
+nnet_res_exp %>% readr::write_rds("neural_network_expanded_model.rds")
+```
+
+```{r}
+nnet_res_exp <- readr::read_rds("neural_network_expanded_model.rds")
+```
+
+
+```{r}
+nnet_res_exp %>% collect_metrics() %>% 
+  ggplot(mapping = aes(x = log10(penalty))) +
+  geom_ribbon(mapping = aes(group = interaction(hidden_units, .metric),
+                            fill = as.factor(hidden_units),
+                            ymin = mean - std_err,
+                            ymax = mean + std_err),
+              alpha = 0.4) +
+  geom_line(mapping = aes(group = interaction(hidden_units, .metric),
+                          color = as.factor(hidden_units),
+                          y = mean),
+            size = 1.2) +
+  facet_wrap(~.metric, scales = "free_y", nrow = 1) +
+  scale_fill_viridis_d("Hidden units") +
+  scale_color_viridis_d("Hidden units") +
+  labs(y = 'performance metric value') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+**Selecting Tuning Parameters that maximize rmse**
+
+```{r}
+nnet_exp_best_max_acc_params <- nnet_res_exp %>% 
+  select_best(metric = 'rmse')
+
+nnet_exp_best_max_acc_params
+```
+
+
+```{r}
+final_nnet_exp_wflow <- nnet_wflow_exp %>% 
+  finalize_workflow(nnet_exp_best_max_acc_params)
+```
+
+**Final neural network workflow**
+
+```{r}
+final_nnet_exp_res <- final_nnet_exp_wflow %>% 
+  fit_resamples(cv_folds_2,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_nnet_exp_res %>% collect_metrics() %>%
+              mutate(wflow_id = "nnet_exp"))
+```
+
+
+
+# Random Forest
+
+```{r}
+rf_spec <- rand_forest(mtry = tune(), min_n = tune(), trees = 1000) %>% 
+  set_engine("ranger") %>% 
+  set_mode('regression')
+```
+ 
+ 
+```{r}
+rf_wflow_base <- workflow() %>% 
+  add_model(rf_spec) %>% 
+  add_formula(y ~ .)
+```
+
+
+```{r}
+rf_param_base <- rf_spec %>% parameters() %>% finalize(df)
+
+rf_grid_base <- grid_regular(rf_param_base, levels = c(mtry = 7, min_n = 5))
+
+rf_grid_base %>% glimpse()
+```
+
+**Using Base Features Set**
+
+```{r, eval=FALSE}
+start_rf <- Sys.time() 
+
+set.seed(7899)
+rf_res_base <- tune_grid(
+  rf_wflow_base,
+  resamples = cv_folds_1,
+  grid = rf_grid_base,
+  metrics = my_metrics
+)
+
+finish_rf <- Sys.time()
+
+finish_rf - start_rf
+```
+
+
+```{r, eval=FALSE}
+rf_res_base %>% readr::write_rds("random_forest_reg_base_model.rds")
+```
+
+
+```{r}
+rf_res_base <- readr::read_rds("random_forest_reg_base_model.rds")
+```
+
+
+```{r}
+rf_res_base %>% autoplot() + theme_bw()
+```
+```{r}
+rf_base_best_acc_params <- rf_res_base %>% select_best('rmse')
+
+rf_base_best_acc_params
+```
+
+```{r}
+final_rf_base_spec <- rand_forest(mtry = 11,
+                              min_n = 2,
+                              trees = 500) %>% 
+  set_engine('ranger', importance = 'impurity') %>% 
+  set_mode('regression')
+
+final_rf_wflow_base <- workflow() %>% 
+  add_model(final_rf_base_spec) %>% 
+  add_formula(y ~ .)
+```
+
+**Training and Accessing final model**
+
+```{r}
+final_rf_fit_base <- final_rf_wflow_base %>% fit(df)
+```
+
+
+```{r}
+final_rf_base_res <- final_rf_wflow_base %>% 
+  fit_resamples(cv_folds_1,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_rf_base_res %>% collect_metrics() %>%
+              mutate(wflow_id = "rf_base"))
+```
+
+
+
+**Random Forest with expanded feature set**
+
+```{r}
+rf_wflow_exp <- workflow() %>% 
+  add_model(rf_spec) %>% 
+  add_formula(y ~ x4 + x5 + v1 + v3 + v4 + v5 + w + z + t + m)
+```
+
+
+```{r}
+rf_param_exp <- rf_spec %>% parameters() %>% finalize(df_derived)
+
+rf_grid_exp <- grid_regular(rf_param_exp, levels = c(mtry = 7, min_n = 5))
+
+rf_grid_exp %>% glimpse()
+```
+
+
+```{r, eval=FALSE}
+start_rf <- Sys.time() 
+
+set.seed(7899)
+rf_res_exp <- tune_grid(
+  rf_wflow_exp,
+  resamples = cv_folds_2,
+  grid = rf_grid_exp,
+  metrics = my_metrics
+)
+
+finish_rf <- Sys.time()
+
+finish_rf - start_rf
+```
+
+
+```{r, eval=FALSE}
+rf_res_exp %>% readr::write_rds("random_forest_reg_exp_model.rds")
+```
+
+
+```{r}
+rf_res_exp <- readr::read_rds("random_forest_reg_exp_model.rds")
+```
+
+
+```{r}
+rf_res_exp %>% autoplot() + theme_bw()
+```
+
+
+```{r}
+rf_exp_best_acc_params <- rf_res_exp %>% select_best('rmse')
+
+rf_exp_best_acc_params
+```
+
+```{r}
+final_rf_exp_spec <- rand_forest(mtry = 8,
+                              min_n = 2,
+                              trees = 500) %>% 
+  set_engine('ranger', importance = 'impurity') %>% 
+  set_mode('regression')
+
+final_rf_wflow_exp <- workflow() %>% 
+  add_model(final_rf_exp_spec) %>% 
+  add_formula(y ~ x4 + x5 + v1 + v3 + v4 + v5 + w + z + t + m)
+```
+
+**Training and Accessing final model**
+
+```{r}
+final_rf_exp_res <- final_rf_wflow_exp %>% 
+  fit_resamples(cv_folds_2,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_rf_exp_res %>% collect_metrics() %>%
+              mutate(wflow_id = "rf_exp"))
+```
+
+
+#Gradient Boosted Trees
+
+
+```{r}
+xgb_spec <- boost_tree(tree_depth = tune(), learn_rate = tune(), 
+                       trees = tune(), mtry = tune(), sample_size = tune()) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("regression")
+```
+
+
+```{r}
+xgb_grid <- crossing(tree_depth = c(1, 3, 6, 9),
+                     learn_rate = c(0.01, 0.1, 0.3),
+                     trees = c(25, 50, 100, 200, 400, 800),
+                     mtry = c(3, 6),
+                     sample_size = c(0.6, 0.8, 1.0))
+
+xgb_grid %>% glimpse()
+```
+
+
+```{r}
+xgb_wflow_base <- workflow() %>% 
+  add_model(xgb_spec) %>% 
+  add_formula(y ~ .)
+```
+
+
+```{r, eval=FALSE}
+start_xgb <- Sys.time() 
+
+set.seed(111)
+xgb_res_base <- tune_grid(
+  xgb_wflow_base,
+  resamples = cv_folds_1,
+  grid = xgb_grid,
+  metrics = my_metrics
+)
+
+finish_xgb <- Sys.time()
+
+finish_xgb - start_xgb
+```
+
+```{r, eval=FALSE}
+xgb_res_base %>% readr::write_rds("xgb_reg_base_model.rds")
+```
+
+```{r}
+xgb_res_base <- readr::read_rds("xgb_reg_base_model.rds")
+```
+
+
+**RMSE averaged results.**
+
+```{r}
+xgb_res_base %>% collect_metrics() %>% 
+  filter(.metric == 'rmse') %>% 
+  ggplot(mapping = aes(x = trees, y = mean)) +
+  geom_line(mapping = aes(color = as.factor(tree_depth),
+                          group = interaction(mtry, tree_depth,
+                                              learn_rate, sample_size)),
+            size = 1.) +
+  facet_grid(learn_rate ~ mtry + sample_size, labeller = "label_both",
+             scales = "free_y") +
+  scale_color_viridis_d("tree depth") +
+  labs(y = 'RMSE') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+**R-squared averaged results.**
+
+```{r}
+xgb_res_base %>% collect_metrics() %>% 
+  filter(.metric == 'rsq') %>% 
+  ggplot(mapping = aes(x = trees, y = mean)) +
+  geom_line(mapping = aes(color = as.factor(tree_depth),
+                          group = interaction(mtry, tree_depth,
+                                              learn_rate, sample_size)),
+            size = 1.) +
+  facet_grid(learn_rate ~ mtry + sample_size, labeller = "label_both",
+             scales = "free_y") +
+  scale_color_viridis_d("tree depth") +
+  labs(y = "R-squared") +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+
+```{r}
+xgb_lowest_rmse_params_base <- xgb_res_base %>% select_best('rmse')
+
+xgb_lowest_rmse_params_base
+```
+
+
+```{r}
+final_xgb_wflow_base <- xgb_wflow_base %>% 
+  finalize_workflow(xgb_lowest_rmse_params_base)
+
+set.seed(7899)
+final_xgb_fit_base <- final_xgb_wflow_base %>% fit(df)
+```
+
+
+```{r}
+set.seed(7899)
+final_xgb_res_base <- final_xgb_wflow_base %>% 
+  fit_resamples(cv_folds_1,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_xgb_res_base %>% collect_metrics() %>%
+              mutate(wflow_id = "xgb_base"))
+```
+
+
+**Using Expanded Features Set**
+
+```{r}
+xgb_wflow_exp <- workflow() %>% 
+  add_model(xgb_spec) %>% 
+  add_formula(y ~ .)
+```
+
+
+```{r, eval=FALSE}
+start_xgb <- Sys.time() 
+
+set.seed(7899)
+xgb_res_exp <- tune_grid(
+  xgb_wflow_exp,
+  resamples = cv_folds_2,
+  grid = xgb_grid,
+  metrics = my_metrics
+)
+
+finish_xgb <- Sys.time()
+
+finish_xgb - start_xgb
+```
+
+
+```{r, eval=FALSE}
+xgb_res_exp %>% readr::write_rds("xgb_reg_exp_model.rds")
+```
+
+
+```{r}
+xgb_res_exp <- readr::read_rds("xgb_reg_exp_model.rds")
+```
+
+
+**RMSE averaged results.**
+
+```{r}
+xgb_res_exp %>% collect_metrics() %>% 
+  filter(.metric == 'rmse') %>% 
+  ggplot(mapping = aes(x = trees, y = mean)) +
+  geom_line(mapping = aes(color = as.factor(tree_depth),
+                          group = interaction(mtry, tree_depth,
+                                              learn_rate, sample_size)),
+            size = 1.) +
+  facet_grid(learn_rate ~ mtry + sample_size, labeller = "label_both",
+             scales = "free_y") +
+  scale_color_viridis_d("tree depth") +
+  labs(y = 'RMSE') +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+**R-squared averaged results.**
+
+```{r}
+xgb_res_exp %>% collect_metrics() %>% 
+  filter(.metric == 'rsq') %>% 
+  ggplot(mapping = aes(x = trees, y = mean)) +
+  geom_line(mapping = aes(color = as.factor(tree_depth),
+                          group = interaction(mtry, tree_depth,
+                                              learn_rate, sample_size)),
+            size = 1.) +
+  facet_grid(learn_rate ~ mtry + sample_size, labeller = "label_both",
+             scales = "free_y") +
+  scale_color_viridis_d("tree depth") +
+  labs(y = "R-squared") +
+  theme_bw() +
+  theme(legend.position = "top")
+```
+
+
+```{r}
+xgb_lowest_rmse_params_exp <- xgb_res_exp %>% select_best('rmse')
+
+xgb_lowest_rmse_params_exp
+```
+
+
+```{r}
+final_xgb_wflow_exp <- xgb_wflow_exp %>% 
+  finalize_workflow(xgb_lowest_rmse_params_exp)
+
+set.seed(7899)
+final_xgb_fit_exp <- final_xgb_wflow_exp %>% fit(df_derived)
+```
+
+
+```{r}
+set.seed(7899)
+final_xgb_res_exp <- final_xgb_wflow_exp %>% 
+  fit_resamples(cv_folds_2,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_xgb_res_exp %>% collect_metrics() %>%
+              mutate(wflow_id = "xgb_exp"))
+```
+
+
+#SUpport Vector Mechanism
+
+
+```{r}
+rbf_default <- svm_rbf(cost = 1, margin = 1) %>% 
+  set_engine('kernlab') %>% 
+  set_mode('regression')
+
+rbf_default_wflow <- workflow() %>% 
+  add_model(rbf_default) %>% 
+  add_recipe(bp_stan_base)
+
+rbf_default_fit <- rbf_default_wflow %>% fit(df)
+
+rbf_default_fit
+```
+
+
+```{r}
+rbf_grid <- crossing(rbf_sigma = c(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5),
+                     cost = c(0.01, 0.1, 1, 10, 100, 1000),
+                     margin = c(0.01, 0.05, 0.1, 1.0))
+
+rbf_grid %>% glimpse()
+```
+
+
+```{r}
+svm_rbf_spec <- svm_rbf(cost = tune(), rbf_sigma = tune(), margin = tune()) %>% 
+  set_engine("kernlab") %>% 
+  set_mode("regression")
+```
+
+
+
+
+**Using Base Features Set**
+
+```{r}
+svm_rbf_wflow_base <- workflow() %>% 
+  add_model(svm_rbf_spec) %>% 
+  add_recipe(bp_stan_base)
+```
+
+
+```{r, eval=FALSE}
+start_rbf <- Sys.time() 
+
+set.seed(111)
+svm_rbf_res_base <- tune_grid(
+  svm_rbf_wflow_base,
+  resamples = cv_folds_1,
+  grid = rbf_grid,
+  metrics = my_metrics
+)
+
+finish_rbf <- Sys.time()
+
+finish_rbf - start_rbf
+```
+
+
+```{r, eval=FALSE}
+svm_rbf_res_base %>% readr::write_rds("svm_reg_base_model.rds")
+```
+
+
+```{r}
+svm_rbf_res_base <- readr::read_rds("svm_reg_base_model.rds")
+```
+
+
+```{r}
+svm_rbf_res_base %>% autoplot() + theme_bw()
+```
+
+
+```{r}
+rbf_lowest_rmse_params_base <- svm_rbf_res_base %>% select_best('rmse')
+
+rbf_lowest_rmse_params_base
+```
+
+
+```{r}
+final_svm_rbf_wflow_base <- svm_rbf_wflow_base %>% 
+  finalize_workflow(rbf_lowest_rmse_params_base)
+```
+
+
+```{r}
+set.seed(7899)
+final_svm_res_base <- final_svm_rbf_wflow_base %>% 
+  fit_resamples(cv_folds_1,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_svm_res_base %>% collect_metrics() %>%
+              mutate(wflow_id = "svm_base"))
+```
+
+
+**Using expanded features set**
+
+```{r}
+svm_rbf_wflow_exp <- workflow() %>% 
+  add_model(svm_rbf_spec) %>% 
+  add_recipe(bp_stan_exp)
+```
+
+
+```{r, eval=FALSE}
+start_rbf <- Sys.time() 
+
+set.seed(7899)
+svm_rbf_res_exp <- tune_grid(
+  svm_rbf_wflow_exp,
+  resamples = cv_folds_2,
+  grid = rbf_grid,
+  metrics = my_metrics
+)
+
+finish_rbf <- Sys.time()
+
+finish_rbf - start_rbf
+```
+
+
+```{r, eval=FALSE}
+svm_rbf_res_exp %>% readr::write_rds("svm_reg_exp_model.rds")
+```
+
+
+```{r}
+svm_rbf_res_exp <- readr::read_rds("svm_reg_exp_model.rds")
+```
+
+
+```{r}
+svm_rbf_res_exp %>% autoplot() + theme_bw()
+```
+
+
+```{r}
+rbf_lowest_rmse_params_exp <- svm_rbf_res_exp %>% select_best('rmse')
+
+rbf_lowest_rmse_params_exp
+```
+
+
+```{r}
+final_svm_rbf_wflow_exp <- svm_rbf_wflow_exp %>% 
+  finalize_workflow(rbf_lowest_rmse_params_exp)
+```
+
+
+```{r}
+set.seed(7899)
+final_svm_res_exp <- final_svm_rbf_wflow_exp %>% 
+  fit_resamples(cv_folds_2,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_svm_res_exp %>% collect_metrics() %>%
+              mutate(wflow_id = "svm_exp"))
+```
+
+
+#Generalized Additive Models (GAM)
+
+
+```{r}
+gam_spec <- gen_additive_mod() %>%
+  set_args(select_features = TRUE) %>%
+  set_args(adjust_deg_free = tune()) %>%
+  set_engine("mgcv") %>%
+  set_mode("regression")
+```
+
+```{r}
+bp_gam_base <- recipe(y ~ ., data = df) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors())
+```
+
+```{r}
+gam_wflow_base <- workflow() %>%
+  add_recipe(bp_gam_base) %>%
+  add_model(gam_spec,
+            formula = y ~ s(x1, k=10) + s(x2, k=10) + s(x3, k=10) + s(x4, k=10) +
+            s(v1, k=10) + s(v2, k=10) + s(v3, k=10) + s(v4, k=10) + s(v5, k=10))
+```
+
+
+```{r, eval=FALSE}
+start_gam <- Sys.time() 
+
+set.seed(7899)
+
+gam_res_base <- tune_grid(
+  gam_wflow_base,
+  resamples = cv_folds_1,
+  metrics = my_metrics
+)
+
+finish_gam <- Sys.time()
+
+finish_gam - start_gam
+```
+
+```{r, eval=FALSE}
+gam_res_base %>% readr::write_rds("gam_reg_base_model.rds")
+```
+
+
+```{r}
+gam_res_base <- readr::read_rds("gam_reg_base_model.rds")
+```
+
+```{r}
+gam_best_rmse_params <- gam_res_base %>% select_best("rmse")
+```
+
+```{r}
+final_gam_spec_base <- gen_additive_mod() %>%
+  set_args(select_features = TRUE) %>%
+  set_args(adjust_deg_free = 1.04) %>%
+  set_engine("mgcv") %>%
+  set_mode("regression")
+
+
+final_gam_wflow_base <- workflow() %>%
+    add_recipe(bp_gam_base) %>%
+    add_model(final_gam_spec_base,
+              formula = y ~ s(x1, k=10) + s(x2, k=10) + s(x3, k=10) + s(x4, k=10) +
+              s(v1, k=10) + s(v2, k=10) + s(v3, k=10) + s(v4, k=10) + s(v5, k=10))
+```
+
+
+```{r}
+final_gam_res_base <- final_gam_wflow_base %>% 
+  fit_resamples(cv_folds_1,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+set.seed(7899)
+final_gam_fit_base <- final_gam_wflow_base %>% 
+  fit(df)
+```
+
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_gam_res_base %>% collect_metrics() %>%
+              mutate(wflow_id = "gam_base"))
+```
+
+**GAM for expanded feature set**
+
+```{r}
+bp_gam_exp <- recipe(y ~ x4 + x5 + v1 + v3 + v4 + v5 + w + z + t, data = df_derived) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors())
+```
+
+```{r}
+gam_wflow_exp <- workflow() %>%
+  add_recipe(bp_gam_exp) %>%
+  add_model(gam_spec,
+            formula = y ~ s(x4, k=10) + s(x5, k=10) + s(w, k=10) + s(z, k=10) +
+            s(t, k=10) + s(v1, k=10) + s(v3, k=10) + s(v4, k=10) + s(v5, k=10))
+```
+
+
+```{r, eval=FALSE}
+start_gam <- Sys.time() 
+
+set.seed(7899)
+
+gam_res_exp <- tune_grid(
+  gam_wflow_exp,
+  resamples = cv_folds_2,
+  metrics = my_metrics
+)
+
+finish_gam <- Sys.time()
+
+finish_gam - start_gam
+```
+
+```{r, eval=FALSE}
+gam_res_exp %>% readr::write_rds("gam_reg_exp_model.rds")
+```
+
+
+```{r}
+gam_res_exp <- readr::read_rds("gam_reg_exp_model.rds")
+```
+
+
+```{r}
+gam_best_rmse_params_exp <- gam_res_exp %>% select_best("rmse")
+```
+
+```{r}
+final_gam_spec_exp <- gen_additive_mod() %>%
+  set_args(select_features = TRUE) %>%
+  set_args(adjust_deg_free = 1.49) %>%
+  set_engine("mgcv") %>%
+  set_mode("regression")
+
+
+final_gam_wflow_exp <- workflow() %>%
+    add_recipe(bp_gam_exp) %>%
+    add_model(final_gam_spec_exp,
+            formula = y ~ s(x4, k=10) + s(x5, k=10) + s(w, k=10) + s(z, k=10) +
+            s(t, k=10) + s(v1, k=10) + s(v3, k=10) + s(v4, k=10) + s(v5, k=10))
+```
+
+
+```{r}
+final_gam_res_exp <- final_gam_wflow_exp %>% 
+  fit_resamples(cv_folds_2,
+                metrics = my_metrics,
+                control = control_resamples(save_pred = TRUE))
+```
+
+
+```{r}
+set.seed(7899)
+final_gam_fit_exp <- final_gam_wflow_exp %>% 
+  fit(df_derived)
+```
+
+```{r}
+all_results <- all_results %>%
+  bind_rows(final_gam_res_exp %>% collect_metrics() %>%
+              mutate(wflow_id = "gam_exp"))
+```
+
+
+### Model Comparision
+
+```{r}
+all_results %>% 
+  mutate(wflow_id = forcats::fct_reorder(wflow_id, mean, min)) %>% 
+  ggplot(mapping = aes(x = wflow_id)) +
+  geom_linerange(mapping = aes(ymin = mean - 2*std_err,
+                               ymax = mean + 2*std_err,
+                               group = interaction(.metric, wflow_id)),
+                 color = 'grey', size = 1.) +
+  geom_linerange(mapping = aes(ymin = mean - 1*std_err,
+                               ymax = mean + 1*std_err,
+                               group = interaction(.metric, wflow_id)),
+                 color = 'red', size = 1.2) +
+  geom_point(mapping = aes(y = mean),
+             color = 'red', size = 2.5) +
+  coord_flip() +
+  facet_wrap(~.metric, scales = "free_x") +
+  labs(y = "performance metric value", x ="") +
+  theme_bw() 
+  
+```
+
+From the above figure we can say that gradient boosted trees with expanded features set is the best model according to all matrices.  
+The second best is the neural network model with the base features set.  
+
+
+```{r}
+all_resample_results <- lm_mod8 %>% collect_metrics(summarize = FALSE) %>%
+  mutate(wflow_id = "Mod-8" ) %>%
+  bind_rows(lm_mod10 %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "Mod-10")) %>%
+  bind_rows(final_enet_res %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "ENET")) %>%
+  bind_rows(final_lm8_enet_res %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "ENET-8")) %>%
+  bind_rows(final_lm10_enet_res %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "ENET-10")) %>%
+  bind_rows(final_nnet_base_res %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "NNET BASE")) %>%
+  bind_rows(final_nnet_exp_res %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "NNET EXP")) %>%
+  bind_rows(final_rf_base_res %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "RF BASE")) %>%
+  bind_rows(final_rf_exp_res %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "RF EXP")) %>%
+  bind_rows(final_xgb_res_base %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "XGB BASE")) %>%
+  bind_rows(final_xgb_res_exp %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "XGB EXP")) %>%
+  bind_rows(final_svm_res_base %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "SVM BASE")) %>%
+  bind_rows(final_svm_res_exp %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "SVM EXP")) %>%
+  bind_rows(final_gam_res_base %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "GAM BASE")) %>%
+  bind_rows(final_gam_res_exp %>% collect_metrics(summarize = FALSE) %>%
+              mutate(wflow_id = "GAM EXP")) %>%
+  mutate(wflow_id = factor(wflow_id,
+                           levels = c("Mod-8", "Mod-10",
+           "ENET", "ENET-8", "ENET-10",
+           "NNET BASE", "NNET EXP",
+           "RF BASE", "RF EXP",
+           "XGB BASE", "XGB EXP",
+           "SVM BASE", "SVM EXP",
+           "GAM BASE", "GAM EXP")))
+```
+
+
+```{r}
+all_resample_results %>% 
+  mutate(wflow_id = stringr::str_replace(wflow_id, " ", "\n")) %>% 
+  filter(.metric == 'rmse') %>% 
+  select(wflow_id, .estimate, id, id2) %>% 
+  pivot_wider(id_cols = c("id", "id2"), 
+              names_from = 'wflow_id', values_from = '.estimate') %>% 
+  select(-id, -id2) %>% 
+  corrr::correlate(quiet = TRUE, diagonal = 1) %>% 
+  corrr::stretch() %>% 
+  ggplot(mapping = aes(x = x, y = y)) +
+  geom_tile(mapping = aes(fill = r),
+            color = 'white') +
+  geom_text(mapping = aes(label = signif(r, 3),
+                          color = abs(r) > 0.75),
+            size = 3.5) +
+  scale_fill_gradient2('corr',
+                       low = 'red', mid = 'white', high = 'blue',
+                       midpoint = 0,
+                       limits = c(-1, 1)) +
+  scale_color_manual(guide = 'none',
+                     values = c("TRUE" = 'white',
+                                "FALSE" = 'black')) +
+  labs(x='', y='') +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) 
+```
+
+
+#Variable Importance
+
+```{r}
+library(vip)
+```
+```{r}
+final_xgb_fit_exp %>%
+  extract_fit_parsnip() %>%
+  pluck("fit") %>%
+  vip(num_features = 20) +
+  theme_bw()
+```
+
+
+```{r}
+final_rf_fit_base %>%
+  extract_fit_parsnip() %>%
+  pluck("fit") %>%
+  vip() +
+  theme_bw()
+```
+
+
+For both models x1 is the most important feature.  
+For random forest model with base features x2 is the second most important feature whereas for the gradient boosted trees model with the expanded feature set z and x5 are the 2nd and 3rd most important variable respectively.  
+
+
+# Predictive Trends
+
+We will make the viz_grid based on x1, x5, z and x2.
+
+```{r}
+viz_grid <- expand.grid(x1 = seq(min(df_derived$x1), max(df_derived$x1), length.out = 51),
+                        x2 = seq(min(df_derived$x2), max(df_derived$x2), length.out = 3),
+                        x3 = median(df_derived$x3),
+                        x4 = median(df_derived$x4),
+                        x5 = seq(min(df_derived$x5), max(df_derived$x5), length.out = 5),
+                        v1 = median(df_derived$v1),
+                        v2 = median(df_derived$v2),
+                        v3 = median(df_derived$v3),
+                        v4 = median(df_derived$v4),
+                        v5 = median(df_derived$v5),
+                        w = median(df_derived$w),
+                        z = seq(min(df_derived$z), max(df_derived$z), length.out = 11),
+                        t = median(df_derived$t),
+                        m = "A",
+                        KEEP.OUT.ATTRS = FALSE,
+                        stringsAsFactors = FALSE) %>% 
+  as.data.frame() %>% tibble::as_tibble()
+
+viz_grid %>% glimpse()
+```
+
+```{r}
+viz_grid %>% purrr::map_dbl(n_distinct)
+```
+```{r}
+viz_grid <- viz_grid %>% mutate(m = factor(m, levels = c("A", "B", "C", "D", "E")))
+```
+
+
+```{r}
+viz_grid_xgb <- expand.grid(x1 = seq(min(df_derived$x1), max(df_derived$x1), length.out = 51),
+                        x2 = seq(min(df_derived$x2), max(df_derived$x2), length.out = 3),
+                        x3 = median(df_derived$x3),
+                        x4 = median(df_derived$x4),
+                        x5 = seq(min(df_derived$x5), max(df_derived$x5), length.out = 5),
+                        v1 = median(df_derived$v1),
+                        v2 = median(df_derived$v2),
+                        v3 = median(df_derived$v3),
+                        v4 = median(df_derived$v4),
+                        v5 = median(df_derived$v5),
+                        w = median(df_derived$w),
+                        z = seq(min(df_derived$z), max(df_derived$z), length.out = 11),
+                        t = median(df_derived$t),
+                        m = c("A", "B", "C", "D", "E"),
+                        KEEP.OUT.ATTRS = FALSE,
+                        stringsAsFactors = FALSE) %>% 
+  as.data.frame() %>% tibble::as_tibble()
+
+viz_grid_xgb %>% glimpse()
+```
+
+
+```{r}
+viz_grid_xgb %>%
+  bind_cols(predict(final_xgb_fit_exp, new_data = viz_grid_xgb)) %>%
+  filter(m == "A") %>%
+  ggplot(mapping = aes(x = x1, y = .pred)) + 
+  geom_line(mapping = aes(color = as.factor(z),
+                          group = interaction(z, x5, x2)),
+            size = 1.1) +
+  facet_grid(x5 ~ x2, labeller = "label_both") +
+  scale_color_viridis_d("Z") +
+  theme_bw() +
+  theme(legend.position = "top") +
+  guides(color = guide_legend(nrow = 2))
+```
+
+
+```{r}
+if(parallel::detectCores(logical=FALSE) > 3){
+  stopCluster(cl)
+}
+```
+
+
+
